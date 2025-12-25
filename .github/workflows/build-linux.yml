@@ -1,0 +1,62 @@
+name: Build Linux
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install ALSA dependencies
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
+      - name: Cache cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build Soulwhistle
+        run: cargo build --release --bin soulwhistle
+
+      - name: Create distribution folder
+        run: |
+          mkdir -p soulwhistle-linux-x86_64
+          cp target/release/soulwhistle soulwhistle-linux-x86_64/
+          chmod +x soulwhistle-linux-x86_64/soulwhistle
+          cp -r presets soulwhistle-linux-x86_64/
+          cp README.md soulwhistle-linux-x86_64/
+          cp LICENSE soulwhistle-linux-x86_64/
+          tar -czf soulwhistle-linux-x86_64.tar.gz soulwhistle-linux-x86_64/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: soulwhistle-linux-x86_64-${{ github.ref_name }}
+          path: soulwhistle-linux-x86_64.tar.gz
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: soulwhistle-linux-x86_64.tar.gz

@@ -1,0 +1,19 @@
+{
+  "preset_title": "Deep Focus - SMR Experimental (14 Hz Beta)",
+  "preset_description": "14 Hz beta binaural beats in the SMR (Sensorimotor Rhythm) range. EXPERIMENTAL preset - SMR frequency is well-established in EEG neurofeedback for ADHD but NOT directly tested in binaural beat research. Kennel et al. (2010) ADHD study showed NO objective benefit from binaural beats. For ADHD, try 10 Hz Alpha (Primary) or 18 Hz Beta (Active) presets instead, which have research support. Optimized 400Hz carrier. 40-min session. REQUIRES HEADPHONES. Individual response varies significantly.",
+  "experimental": true,
+  "lock_signal_layer": true,
+  "master_vol": 0.6,
+  "coherence": {
+    "enabled": true,
+    "being_type": "HumanCustom",
+    "left_carrier": 414.0,
+    "right_carrier": 400.0,
+    "custom_binaural_hz": 14.0,
+    "volume": 0.6,
+    "startup_duration_min": 2.0,
+    "induction_duration_min": 18.0,
+    "stabilization_duration_min": 15.0,
+    "return_duration_min": 5.0
+  }
+}

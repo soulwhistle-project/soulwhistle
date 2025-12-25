@@ -1,0 +1,20 @@
+{
+  "carrier_vol": 0.5,
+  "carrier_type": "Square",
+  "harmonic_vol": 0.3,
+  "harmonic_type": "Triangle",
+  "ping_vol": 0.1,
+  "ping_type": "Square",
+  "chirp_vol": 0.4,
+  "chirp_type": "SyntheticChirp",
+  "pad_vol": 0.2,
+  "pad_type": "Saw",
+  "breath_vol": 0.37999994,
+  "breath_type": "WhiteNoise",
+  "master_vol": 0.1,
+  "playing": true,
+  "rf_enabled": false,
+  "rf_freq_hz": 1420405752,
+  "rf_gain": 30,
+  "rf_mode": "WBFM"
+}

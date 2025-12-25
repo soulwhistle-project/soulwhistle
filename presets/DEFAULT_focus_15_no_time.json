@@ -1,0 +1,13 @@
+{
+  "preset_title": "Focus 15 - No Time",
+  "preset_description": "4.80 Hz theta binaural beats with elevated 300 Hz carriers - Access timeless consciousness beyond linear time. Decoded from Gateway Experience Wave V. REQUIRES HEADPHONES.",
+  "lock_signal_layer": true,
+  "master_vol": 0.6,
+  "coherence": {
+    "enabled": true,
+    "being_type": "HumanFocus15",
+    "left_carrier": 304.8,
+    "right_carrier": 300.0,
+    "volume": 0.8
+  }
+}

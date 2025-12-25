@@ -1,0 +1,13 @@
+{
+  "preset_title": "UAP Sweep 18kHz",
+  "preset_description": "RESEARCH TOOL ONLY - NO CLAIMS MADE. Based on UAPWatchers.com ultrasonic sweep documentation starting at 18kHz. WARNING: Most standard speakers cannot reproduce this frequency accurately. Requires high-fidelity audio hardware (88.2kHz+ sample rate) or ultrasonic piezo transducers (25-40kHz range). For electromagnetic transmission, use the RF variant instead (legal authorization required).",
+  "experimental": true,
+  "carrier_vol": 0.0,
+  "ping_vol": 0.5,
+  "ping_type": "Sine",
+  "ping_freq_hz": 18000.0,
+  "chirp_vol": 0.0,
+  "pad_vol": 0.0,
+  "breath_vol": 0.0,
+  "master_vol": 0.3
+}

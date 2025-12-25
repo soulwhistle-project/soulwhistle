@@ -1,0 +1,18 @@
+{
+  "preset_title": "Deep Focus - Active (18 Hz Beta)",
+  "preset_description": "18 Hz low-beta binaural beats for active focus, vigilance, and analytical tasks. Best for coding, problem-solving, and high-engagement work. Based on Lane et al. (1998) - tested 16 & 24 Hz beta, showed improved vigilance and mood over 30 min. Secondary ADHD option for HIGH dopamine individuals (per Reedijk et al. 2013 - low dopamine individuals respond better to 10 Hz alpha). Optimized 400Hz carrier. 40-min session. REQUIRES HEADPHONES. Individual response varies - try 10 Hz Alpha (Primary) first for ADHD.",
+  "lock_signal_layer": true,
+  "master_vol": 0.6,
+  "coherence": {
+    "enabled": true,
+    "being_type": "HumanCustom",
+    "left_carrier": 418.0,
+    "right_carrier": 400.0,
+    "custom_binaural_hz": 18.0,
+    "volume": 0.6,
+    "startup_duration_min": 2.0,
+    "induction_duration_min": 18.0,
+    "stabilization_duration_min": 15.0,
+    "return_duration_min": 5.0
+  }
+}

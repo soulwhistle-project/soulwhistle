@@ -1,0 +1,58 @@
+name: Build Windows
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build Soulwhistle
+        run: cargo build --release --bin soulwhistle
+
+      - name: Create distribution folder
+        run: |
+          mkdir soulwhistle-windows
+          copy target\\release\\soulwhistle.exe soulwhistle-windows\\
+          xcopy /E /I presets soulwhistle-windows\\presets
+          copy README.md soulwhistle-windows\\
+          copy LICENSE soulwhistle-windows\\
+          powershell Compress-Archive -Path soulwhistle-windows -DestinationPath soulwhistle-windows.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: soulwhistle-windows-${{ github.ref_name }}
+          path: soulwhistle-windows.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: soulwhistle-windows.zip

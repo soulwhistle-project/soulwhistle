@@ -1,0 +1,18 @@
+{
+  "preset_title": "Deep Focus - ADHD Primary (10 Hz Alpha)",
+  "preset_description": "10 Hz alpha binaural beats for relaxed focus and sustained attention. PRIMARY ADHD support preset based on Reedijk et al. (2013) - LOW dopamine individuals (typical in ADHD) showed significant benefit from alpha frequencies. Best for sustained reading, creative work, and attention tasks. Optimized 400Hz carrier. 45-min session. REQUIRES HEADPHONES. Individual response varies significantly - if no effect after 3-5 sessions, try 16-18 Hz beta (Active preset).",
+  "lock_signal_layer": true,
+  "master_vol": 0.6,
+  "coherence": {
+    "enabled": true,
+    "being_type": "HumanCustom",
+    "left_carrier": 410.0,
+    "right_carrier": 400.0,
+    "custom_binaural_hz": 10.0,
+    "volume": 0.6,
+    "startup_duration_min": 3.0,
+    "induction_duration_min": 20.0,
+    "stabilization_duration_min": 17.0,
+    "return_duration_min": 5.0
+  }
+}

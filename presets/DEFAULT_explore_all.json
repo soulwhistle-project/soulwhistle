@@ -1,0 +1,30 @@
+{
+  "preset_title": "Explore All - Full Spectrum",
+  "preset_description": "Full-spectrum exploration preset with ALL signal layers unlocked and binaural beats at 7.5 Hz (alpha-theta border). Perfect for experimentation - adjust any parameter, change waveforms with 'o', modify frequencies. Combines consciousness exploration (binaural) with signal synthesis to explore and discover phenomena. For headphones + experimentation. Starting point for discovery.",
+  "experimental": true,
+  "lock_signal_layer": false,
+  "master_vol": 0.5,
+  "carrier_vol": 0.2,
+  "carrier_type": "SchumannAM",
+  "harmonic_vol": 0.15,
+  "harmonic_type": "Sine",
+  "ping_vol": 0.1,
+  "ping_type": "Sine",
+  "ping_freq_hz": 17000.0,
+  "chirp_vol": 0.12,
+  "chirp_type": "OrganicChirp",
+  "pad_vol": 0.18,
+  "pad_type": "Sine",
+  "breath_vol": 0.08,
+  "breath_type": "LfoBreathing",
+  "coherence": {
+    "enabled": true,
+    "being_type": "HumanCustom",
+    "left_carrier": 200.0,
+    "right_carrier": 207.5,
+    "custom_binaural_hz": 7.5,
+    "harmonic_220hz": true,
+    "harmonic_495hz": false,
+    "volume": 0.5
+  }
+}

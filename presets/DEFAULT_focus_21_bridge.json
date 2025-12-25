@@ -1,0 +1,13 @@
+{
+  "preset_title": "Focus 21 - Bridge to Other Realities",
+  "preset_description": "4.00 Hz theta/delta border binaural beats with 200 Hz carriers - PRIMARY OBE (Out-of-Body Experience) STATE. Clean, uninterrupted signal for accessing non-physical dimensions. Decoded from Gateway Experience Wave VI. REQUIRES HEADPHONES.",
+  "lock_signal_layer": true,
+  "master_vol": 0.6,
+  "coherence": {
+    "enabled": true,
+    "being_type": "HumanFocus21",
+    "left_carrier": 200.0,
+    "right_carrier": 204.0,
+    "volume": 0.8
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "preset_title": "UAP Enigmatic Ideas",
+  "preset_description": "RESEARCH TOOL ONLY - NO CLAIMS MADE. Anecdotal implementation from enigmaticideas.com: 100Hz carrier AM modulated at 7.83Hz (Schumann), 528Hz harmonic, 17kHz ultrasonic ping, 2.5kHz organic chirps, 432Hz pad, and breathing layer. Many reported frequencies don't make sense with standard speakers - see RF variant for electromagnetic experimentation. For independent research only.",
+  "experimental": true,
+  "carrier_vol": 0.5,
+  "carrier_type": "SchumannAM",
+  "harmonic_vol": 0.3,
+  "harmonic_type": "Sine",
+  "ping_vol": 0.1,
+  "ping_type": "Sine",
+  "ping_freq_hz": 17000.0,
+  "chirp_vol": 0.4,
+  "chirp_type": "OrganicChirp",
+  "pad_vol": 0.2,
+  "pad_type": "Sine",
+  "breath_vol": 0.3,
+  "breath_type": "LfoBreathing",
+  "master_vol": 0.3
+}

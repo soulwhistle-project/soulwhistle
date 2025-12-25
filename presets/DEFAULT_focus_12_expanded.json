@@ -1,0 +1,18 @@
+{
+  "preset_title": "Focus 12 - Expanded Awareness",
+  "preset_description": "1.50 Hz delta binaural beats - Deep surrender and expanded consciousness. Decoded from Monroe Institute Gateway Experience Wave IV. Optimized 350Hz carrier for robust effect. Extended 45-minute session for deeper entrainment. REQUIRES HEADPHONES. NOTE: Individual response varies significantly - adjust volume if no effect felt.",
+  "lock_signal_layer": true,
+  "master_vol": 0.6,
+  "coherence": {
+    "enabled": true,
+    "being_type": "HumanFocus12",
+    "left_carrier": 350.0,
+    "right_carrier": 348.5,
+    "harmonic_495hz": true,
+    "volume": 0.8,
+    "startup_duration_min": 3.0,
+    "induction_duration_min": 20.0,
+    "stabilization_duration_min": 15.0,
+    "return_duration_min": 7.0
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "preset_title": "Dog Whistle (40 kHz)",
+  "preset_description": "Generates a 40 kHz ultrasonic tone, typically audible to dogs but not most humans. IMPORTANT: Most standard speakers, headphones, and sound cards cannot reproduce frequencies this high. Specialized ultrasonic emitters or high-fidelity audio hardware with a sample rate of at least 88.2 kHz are required to generate a true 40 kHz sound wave.",
+  "experimental": true,
+  "ping_vol": 0.3,
+  "ping_freq_hz": 40000.0,
+  "master_vol": 0.2
+}

@@ -1,0 +1,14 @@
+{
+  "preset_title": "UAP Frequencies",
+  "preset_description": "RESEARCH TOOL ONLY - NO CLAIMS MADE. Multi-layered signal combining community-documented frequencies: Schumann resonance (7.83Hz), solfeggio (528Hz), ultrasonic ping (17kHz), organic chirps, ambient pad (432Hz), and breathing layer. For independent experimentation. No binaural beats - designed for open-air playback.",
+  "experimental": true,
+  "carrier_vol": 0.5,
+  "carrier_type": "SchumannAM",
+  "harmonic_vol": 0.3,
+  "ping_vol": 0.1,
+  "ping_freq_hz": 17000.0,
+  "chirp_vol": 0.4,
+  "pad_vol": 0.2,
+  "breath_vol": 0.3,
+  "master_vol": 0.3
+}

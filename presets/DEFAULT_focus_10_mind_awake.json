@@ -1,0 +1,18 @@
+{
+  "preset_title": "Focus 10 - Mind Awake, Body Asleep",
+  "preset_description": "4.11 Hz theta binaural beats - Foundation training state for deep relaxation while maintaining awareness. Decoded from Monroe Institute Gateway Experience Wave I. Optimized 400Hz carrier for robust effect. REQUIRES HEADPHONES. NOTE: Individual response varies significantly - adjust volume if no effect felt.",
+  "lock_signal_layer": true,
+  "master_vol": 0.6,
+  "coherence": {
+    "enabled": true,
+    "being_type": "HumanFocus10",
+    "left_carrier": 400.0,
+    "right_carrier": 404.11,
+    "harmonic_220hz": true,
+    "volume": 0.8,
+    "startup_duration_min": 2.0,
+    "induction_duration_min": 13.0,
+    "stabilization_duration_min": 10.0,
+    "return_duration_min": 5.0
+  }
+}

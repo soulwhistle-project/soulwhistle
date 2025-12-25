@@ -1,0 +1,15 @@
+{
+  "preset_title": "UAP Brycehelm",
+  "preset_description": "RESEARCH TOOL ONLY - NO CLAIMS MADE. Implementation of Bryce Helm's UAP dog whistle design (github.com/brycehelm/UAP_Dog_Whistle) using 783Hz carrier AM modulated at 7.83Hz (Schumann resonance), solfeggio harmonic (528Hz), ultrasonic ping (17kHz), organic chirps (2.5kHz), ambient pad (432Hz), and breathing layer. For independent experimentation. Credit: Bryce Helm.",
+  "experimental": true,
+  "carrier_vol": 0.5,
+  "carrier_type": "Schumann783AM",
+  "harmonic_vol": 0.3,
+  "ping_vol": 0.1,
+  "ping_freq_hz": 17000.0,
+  "chirp_vol": 0.4,
+  "chirp_type": "OrganicChirp",
+  "pad_vol": 0.2,
+  "breath_vol": 0.3,
+  "master_vol": 0.3
+}

@@ -1,0 +1,13 @@
+{
+  "preset_title": "UAP Sweep 24kHz",
+  "preset_description": "RESEARCH TOOL ONLY - NO CLAIMS MADE. Based on UAPWatchers.com ultrasonic sweep documentation ending at 24kHz. WARNING: This frequency is beyond human hearing and most speaker capabilities. Requires specialized ultrasonic piezo transducers (25-40kHz range) or use RF transmission mode with HackRF for electromagnetic emission (legal authorization required).",
+  "experimental": true,
+  "carrier_vol": 0.0,
+  "ping_vol": 0.5,
+  "ping_type": "Sine",
+  "ping_freq_hz": 24000.0,
+  "chirp_vol": 0.0,
+  "pad_vol": 0.0,
+  "breath_vol": 0.0,
+  "master_vol": 0.3
+}
