@@ -2,7 +2,23 @@
 name = "soulwhistle"
 version = "0.2.0"
 edition = "2021"
+authors = ["Soulwhistle Project"]
+description = "Open-source platform for consciousness research using binaural beats, brainwave entrainment, and audio synthesis"
+license = "Apache-2.0"
 repository = "https://github.com/soulwhistle-project/soulwhistle"
+homepage = "https://github.com/soulwhistle-project/soulwhistle"
+readme = "README.md"
+keywords = ["binaural", "brainwave", "audio", "synthesis", "consciousness"]
+categories = ["multimedia::audio", "science"]
+exclude = [
+    ".github/",
+    ".claude/",
+    "TODO.md",
+    "test/",
+    "tools/",
+    "design/",
+    "data/custom_*.json"
+]
 
 [dependencies]
 anyhow = "1.0.100"
