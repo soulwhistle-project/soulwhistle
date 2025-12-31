@@ -30,17 +30,32 @@ Soulwhistle is a real-time audio synthesis engine designed for researchers, prac
 
 ### Installation
 
+**Option 1: Install from crates.io (recommended)**
+
+```bash
+cargo install soulwhistle
+soulwhistle
+```
+
+**Option 2: Build from source**
+
 ```bash
 # Clone repository
 git clone https://github.com/soulwhistle-project/soulwhistle
 cd soulwhistle
 
-# Build (requires Rust)
-cargo build --release
+# Build and install
+cargo install --path .
 
-# Run
+# Or just build
+cargo build --release
 ./target/release/soulwhistle
 ```
+
+Presets are automatically installed to:
+- Linux: `~/.config/soulwhistle/presets/`
+- macOS: `~/Library/Application Support/soulwhistle/presets/`
+- Windows: `%APPDATA%\soulwhistle\presets\`
 
 ### Quick Start
 

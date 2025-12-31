@@ -17,13 +17,17 @@ exclude = [
     "test/",
     "tools/",
     "design/",
-    "data/custom_*.json"
+    "data/",
+    "research/",
+    "docs/",
+    "test_*.sh"
 ]
 
 [dependencies]
 anyhow = "1.0.100"
 cpal = "0.17.0"
 crossterm = "0.29.0"
+directories = "5.0"
 num-complex = "0.4.6"
 parking_lot = "0.12.5"
 rand = "0.9.2"

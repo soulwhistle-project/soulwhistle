@@ -24,6 +24,7 @@ mod rf;
 mod streaming;
 mod constants;
 mod utils;
+mod embedded_presets;
 
 use audio::{AudioParams, Synthesizer, SignalType};
 use coherence::BeingType;
@@ -267,34 +268,30 @@ impl App {
                     // Load the new preset
                     let preset_info = &self.preset_list[next_idx];
                     let filename = preset_info.filename.clone();
-                    let path = std::path::Path::new(PRESETS_DIR).join(&filename);
-                    
+
                     drop(params); // Release lock before file I/O
 
-                    if let Ok(mut file) = File::open(&path) {
-                        use std::io::Read;
-                        let mut json = String::new();
-                        if file.read_to_string(&mut json).is_ok() {
-                            if let Ok(mut loaded) = serde_json::from_str::<AudioParams>(&json) {
-                                loaded.rf_enabled = false; // Safety
-                                
-                                // Preserve streaming settings when loading preset
-                                let mut params = self.params.lock();
-                                let stream_enabled = params.stream_enabled;
-                                let stream_port = params.stream_port;
-                                
-                                loaded.stream_enabled = stream_enabled;
-                                loaded.stream_port = stream_port;
-                                
-                                *params = loaded;
-                                drop(params);
-                                
-                                self.current_preset = Some(filename.clone());
-                                return;
-                            }
+                    // Use hybrid loading (user dir first, then embedded fallback)
+                    if let Some(json) = load_preset_hybrid(&filename) {
+                        if let Ok(mut loaded) = serde_json::from_str::<AudioParams>(&json) {
+                            loaded.rf_enabled = false; // Safety
+
+                            // Preserve streaming settings when loading preset
+                            let mut params = self.params.lock();
+                            let stream_enabled = params.stream_enabled;
+                            let stream_port = params.stream_port;
+
+                            loaded.stream_enabled = stream_enabled;
+                            loaded.stream_port = stream_port;
+
+                            *params = loaded;
+                            drop(params);
+
+                            self.current_preset = Some(filename.clone());
+                            return;
                         }
                     }
-                    
+
                     // If load fails
                     self.status_msg = Some((format!("Failed to load {}", filename), std::time::Instant::now()));
                 },
@@ -544,14 +541,21 @@ impl App {
 
     fn refresh_presets(&mut self) {
         self.preset_list.clear();
-        let _ = std::fs::create_dir_all(PRESETS_DIR);
+        let presets_dir = get_presets_dir();
+        let _ = std::fs::create_dir_all(&presets_dir);
 
-        if let Ok(entries) = std::fs::read_dir(PRESETS_DIR) {
+        use std::collections::HashSet;
+        let mut loaded_files = HashSet::new();
+
+        // Load from user directory first (user presets and modified defaults)
+        if let Ok(entries) = std::fs::read_dir(&presets_dir) {
             for entry in entries.flatten() {
                 if let Ok(name) = entry.file_name().into_string() {
                     if name.ends_with(".json") {
+                        loaded_files.insert(name.clone());
+
                         // Try to load metadata
-                        let path = std::path::Path::new(PRESETS_DIR).join(&name);
+                        let path = presets_dir.join(&name);
                         let mut title = None;
                         let mut description = None;
                         let mut experimental = None;
@@ -576,6 +580,28 @@ impl App {
                         });
                     }
                 }
+            }
+        }
+
+        // Add embedded presets that aren't already loaded from user directory
+        for preset in embedded_presets::EMBEDDED_PRESETS {
+            if !loaded_files.contains(preset.filename) {
+                let mut title = None;
+                let mut description = None;
+                let mut experimental = None;
+
+                if let Ok(params) = serde_json::from_str::<AudioParams>(preset.content) {
+                    title = params.preset_title;
+                    description = params.preset_description;
+                    experimental = params.experimental;
+                }
+
+                self.preset_list.push(PresetInfo {
+                    filename: preset.filename.to_string(),
+                    title,
+                    description,
+                    experimental,
+                });
             }
         }
         // Sort with DEFAULT_ files first
@@ -609,34 +635,30 @@ impl App {
             if i < self.preset_list.len() {
                 let preset_info = &self.preset_list[i];
                 let filename = &preset_info.filename;
-                let path = std::path::Path::new(PRESETS_DIR).join(filename);
 
-                if let Ok(mut file) = File::open(&path) {
-                    use std::io::Read;
-                    let mut json = String::new();
-                    if file.read_to_string(&mut json).is_ok() {
-                         if let Ok(mut loaded) = serde_json::from_str::<AudioParams>(&json) {
-                             // Safety
-                             loaded.rf_enabled = false;
-                             
-                             // Preserve streaming settings when loading preset
-                             let mut params = self.params.lock();
-                             let stream_enabled = params.stream_enabled;
-                             let stream_port = params.stream_port;
-                             
-                             loaded.stream_enabled = stream_enabled;
-                             loaded.stream_port = stream_port;
-                             
-                             *params = loaded;
-                             drop(params);
+                // Use hybrid loading (user dir first, then embedded fallback)
+                if let Some(json) = load_preset_hybrid(filename) {
+                    if let Ok(mut loaded) = serde_json::from_str::<AudioParams>(&json) {
+                        // Safety
+                        loaded.rf_enabled = false;
 
-                             // Store preset name
-                             self.current_preset = Some(filename.clone());
+                        // Preserve streaming settings when loading preset
+                        let mut params = self.params.lock();
+                        let stream_enabled = params.stream_enabled;
+                        let stream_port = params.stream_port;
 
-                             self.status_msg = Some((format!("Loaded {}", filename), std::time::Instant::now()));
-                             self.exit_preset_mode();
-                             return;
-                         }
+                        loaded.stream_enabled = stream_enabled;
+                        loaded.stream_port = stream_port;
+
+                        *params = loaded;
+                        drop(params);
+
+                        // Store preset name
+                        self.current_preset = Some(filename.clone());
+
+                        self.status_msg = Some((format!("Loaded {}", filename), std::time::Instant::now()));
+                        self.exit_preset_mode();
+                        return;
                     }
                 }
                 self.status_msg = Some(("Failed to load preset".to_string(), std::time::Instant::now()));
@@ -655,7 +677,8 @@ impl App {
         };
 
         // Create presets directory if it doesn't exist
-        if let Err(e) = std::fs::create_dir_all(PRESETS_DIR) {
+        let presets_dir = get_presets_dir();
+        if let Err(e) = std::fs::create_dir_all(&presets_dir) {
             self.status_msg = Some((format!("Error creating presets directory: {}", e), std::time::Instant::now()));
             return;
         }
@@ -667,7 +690,7 @@ impl App {
         let timestamp = since_the_epoch.as_secs();
 
         let filename = format!("custom_{}.json", timestamp);
-        let path = std::path::Path::new(PRESETS_DIR).join(filename);
+        let path = presets_dir.join(filename);
 
         match File::create(&path) {
             Ok(mut file) => {
@@ -728,7 +751,50 @@ impl App {
     }
 }
 
+/// Initialize presets directory and copy embedded presets if needed
+fn initialize_presets() -> std::io::Result<()> {
+    let presets_dir = get_presets_dir();
+
+    // Create presets directory if it doesn't exist
+    std::fs::create_dir_all(&presets_dir)?;
+
+    // Copy embedded presets to user directory if they don't exist
+    for preset in embedded_presets::EMBEDDED_PRESETS {
+        let preset_path = presets_dir.join(preset.filename);
+
+        // Only copy if the file doesn't already exist (user may have modified it)
+        if !preset_path.exists() {
+            std::fs::write(&preset_path, preset.content)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Load preset from user directory or embedded fallback
+fn load_preset_hybrid(filename: &str) -> Option<String> {
+    // Try user directory first
+    let user_path = get_presets_dir().join(filename);
+    if user_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&user_path) {
+            return Some(content);
+        }
+    }
+
+    // Fallback to embedded preset
+    for preset in embedded_presets::EMBEDDED_PRESETS {
+        if preset.filename == filename {
+            return Some(preset.content.to_string());
+        }
+    }
+
+    None
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
+    // Initialize presets directory and copy embedded presets on first run
+    let _ = initialize_presets();
+
     // 1. Audio Setup
     let host = cpal::default_host();
     let device = host.default_output_device().expect("no output device available");
@@ -738,7 +804,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut initial_params = AudioParams::default();
     let mut loaded_preset_name: Option<String> = None;
 
-    // Try to load preset.json first, fallback to default preset
+    // Try to load preset.json first (from current directory for backwards compatibility)
     let preset_loaded = if let Ok(mut file) = File::open(PRESET_FILENAME) {
         use std::io::Read;
         let mut json = String::new();
@@ -758,18 +824,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         false
     };
 
-    // If no preset.json, load default deep focus preset
+    // If no preset.json, load default deep focus preset using hybrid loading
     if !preset_loaded {
-        let default_preset_path = std::path::Path::new(PRESETS_DIR).join(DEFAULT_PRESET_FILENAME);
-        if let Ok(mut file) = File::open(default_preset_path) {
-            use std::io::Read;
-            let mut json = String::new();
-            if file.read_to_string(&mut json).is_ok() {
-                if let Ok(loaded) = serde_json::from_str::<AudioParams>(&json) {
-                    initial_params = loaded;
-                    initial_params.rf_enabled = false; // Safety
-                    loaded_preset_name = Some(DEFAULT_PRESET_FILENAME.to_string());
-                }
+        if let Some(json) = load_preset_hybrid(DEFAULT_PRESET_FILENAME) {
+            if let Ok(loaded) = serde_json::from_str::<AudioParams>(&json) {
+                initial_params = loaded;
+                initial_params.rf_enabled = false; // Safety
+                loaded_preset_name = Some(DEFAULT_PRESET_FILENAME.to_string());
             }
         }
     }
@@ -830,9 +891,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     }?;
 
     stream.play()?;
-
-    // Ensure presets folder exists on startup
-    let _ = std::fs::create_dir_all(PRESETS_DIR);
 
     // 2. TUI Setup
     enable_raw_mode()?;

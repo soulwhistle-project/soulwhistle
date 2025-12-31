@@ -32,6 +32,7 @@ test/
 dist/
 *.tar.gz
 *.zip
+test_*.sh
 
 # Design assets and work-in-progress files
 design/

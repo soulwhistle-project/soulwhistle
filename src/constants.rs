@@ -202,14 +202,24 @@ pub const WAV_BYTES_PER_SAMPLE: u16 = 2;
 pub const WAV_BLOCK_ALIGN: u16 = WAV_STEREO_CHANNELS * WAV_BYTES_PER_SAMPLE;
 
 // === File Paths ===
-/// Presets directory
-pub const PRESETS_DIR: &str = "presets";
-
 /// Saved preset filename
 pub const PRESET_FILENAME: &str = "preset.json";
 
 /// Default preset to load on startup
 pub const DEFAULT_PRESET_FILENAME: &str = "DEFAULT_deep_focus_active.json";
+
+/// Get user config directory for presets
+/// Returns ~/.config/soulwhistle/presets on Linux
+/// Returns ~/Library/Application Support/soulwhistle/presets on macOS
+/// Returns %APPDATA%\soulwhistle\presets on Windows
+pub fn get_presets_dir() -> std::path::PathBuf {
+    if let Some(proj_dirs) = directories::ProjectDirs::from("", "", "soulwhistle") {
+        proj_dirs.config_dir().join("presets")
+    } else {
+        // Fallback to current directory if we can't determine config dir
+        std::path::PathBuf::from("presets")
+    }
+}
 
 // === Amplitude Thresholds ===
 /// Threshold for AM modulation depth
