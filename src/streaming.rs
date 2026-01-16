@@ -8,6 +8,7 @@ pub struct AudioRingBuffer {
     buffer: Mutex<VecDeque<(f32, f32)>>,
     capacity: usize,
     sample_rate: u32,
+    stream_epoch: Mutex<u32>, // Incremented when preset changes to force client reconnects
 }
 
 impl AudioRingBuffer {
@@ -17,21 +18,41 @@ impl AudioRingBuffer {
             buffer: Mutex::new(VecDeque::with_capacity(capacity)),
             capacity,
             sample_rate,
+            stream_epoch: Mutex::new(0),
         }
     }
 
-    /// Push stereo samples into the ring buffer
-    pub fn push_samples(&self, left: f32, right: f32) {
+    /// Push multiple stereo samples into the ring buffer (batch operation)
+    /// Single lock acquisition for entire batch - critical for realtime audio
+    pub fn push_samples_batch(&self, samples: &[(f32, f32)]) {
         let mut buf = self.buffer.lock();
-        if buf.len() >= self.capacity {
-            buf.pop_front(); // Remove oldest sample
+        for &(left, right) in samples {
+            if buf.len() >= self.capacity {
+                buf.pop_front(); // Remove oldest sample
+            }
+            buf.push_back((left, right));
         }
-        buf.push_back((left, right));
     }
 
     /// Get sample rate
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
+    }
+
+    /// Flush the buffer (clear all samples) and increment epoch to force client reconnects
+    pub fn flush(&self) {
+        let mut buf = self.buffer.lock();
+        buf.clear();
+        drop(buf);
+
+        // Increment epoch to signal preset change to active streaming clients
+        let mut epoch = self.stream_epoch.lock();
+        *epoch = epoch.wrapping_add(1);
+    }
+
+    /// Get current stream epoch (for detecting preset changes in streaming clients)
+    pub fn get_epoch(&self) -> u32 {
+        *self.stream_epoch.lock()
     }
 
     /// Read samples from a specific position
@@ -102,7 +123,7 @@ impl StreamingServer {
 
                 // Spawn thread to handle this client
                 std::thread::spawn(move || {
-                    if let Err(e) = handle_stream_request(request, buffer) {
+                    if let Err(e) = handle_stream_request(request, buffer.clone()) {
                         eprintln!("Stream error: {}", e);
                     }
                     
@@ -126,12 +147,13 @@ fn handle_stream_request(
     buffer: Arc<AudioRingBuffer>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let sample_rate = buffer.sample_rate();
-    
+    let initial_epoch = buffer.get_epoch(); // Capture epoch at connection start
+
     // Create WAV header for infinite stream
     let wav_header = create_wav_header(sample_rate);
-    
+
     // Create a streaming reader
-    let stream_reader = AudioStreamReader::new(buffer, Some(wav_header));
+    let stream_reader = AudioStreamReader::new(buffer, Some(wav_header), initial_epoch);
     
     // Create response
     let response = tiny_http::Response::new(
@@ -156,21 +178,29 @@ struct AudioStreamReader {
     position: usize,
     header: Option<Vec<u8>>,
     pcm_buffer: Vec<u8>, // Reusable buffer for PCM conversion
+    initial_epoch: u32,  // Epoch when connection started (to detect preset changes)
 }
 
 impl AudioStreamReader {
-    fn new(buffer: Arc<AudioRingBuffer>, header: Option<Vec<u8>>) -> Self {
+    fn new(buffer: Arc<AudioRingBuffer>, header: Option<Vec<u8>>, initial_epoch: u32) -> Self {
         Self {
             buffer,
             position: 0,
             header,
             pcm_buffer: Vec::new(),
+            initial_epoch,
         }
     }
 }
 
 impl std::io::Read for AudioStreamReader {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        // Check if epoch changed (preset changed) - close connection to force client reconnect
+        if self.buffer.get_epoch() != self.initial_epoch {
+            // Return 0 to signal end-of-stream, causing client to reconnect
+            return Ok(0);
+        }
+
         // First, send the header if we have one
         if let Some(header) = self.header.take() {
             let len = header.len().min(buf.len());

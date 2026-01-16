@@ -91,6 +91,10 @@ pub struct AudioParams {
     pub session_timer: f32,
     #[serde(skip)]
     pub session_phase: crate::coherence::SessionPhase,
+
+    // Preset change tracking (for detecting when to reset synthesizer state)
+    #[serde(skip)]
+    pub preset_version: u32,
 }
 
 #[derive(Default)]
@@ -149,6 +153,7 @@ impl Default for AudioParams {
 
             session_timer: 0.0,
             session_phase: crate::coherence::SessionPhase::Startup,
+            preset_version: 0,
         }
     }
 }
@@ -223,6 +228,9 @@ impl Synthesizer {
             components.pad * params.pad_vol +
             components.breath * params.breath_vol
         };
+
+        // Always update session timer (regardless of being type)
+        self.coherence.update_timer(&params.coherence);
 
         // Generate Neural Coherence binaural beat (stereo)
         let (coherence_left, coherence_right) = if !matches!(params.coherence.being_type, crate::coherence::BeingType::Unknown) {
@@ -361,5 +369,22 @@ impl Synthesizer {
         };
         
         rf_signal * params.master_vol
+    }
+
+    /// Reset all synthesizer state (called when preset changes to avoid glitches)
+    pub fn reset(&mut self) {
+        // Reset all phase accumulators
+        self.phase_100hz = 0.0;
+        self.phase_783hz = 0.0;
+        self.phase_7_83hz = 0.0;
+        self.phase_528hz = 0.0;
+        self.phase_17khz = 0.0;
+        self.phase_432hz = 0.0;
+        self.phase_2_5khz = 0.0;
+        self.breath_phase = 0.0;
+        self.chirp_timer = 0.0;
+
+        // Reset coherence synthesizer (session timer, gamma bursts, etc.)
+        self.coherence.reset();
     }
 }

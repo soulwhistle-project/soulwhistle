@@ -25,30 +25,6 @@ pub enum BeingType {
 }
 
 impl BeingType {
-    #[allow(dead_code)]
-    pub fn name(&self) -> &str {
-        match self {
-            BeingType::Unknown => "Unknown (UAP)",
-            BeingType::HumanFocus10 => "Human: Focus 10",
-            BeingType::HumanFocus12 => "Human: Focus 12",
-            BeingType::HumanFocus15 => "Human: Focus 15",
-            BeingType::HumanFocus21 => "Human: Focus 21",
-            BeingType::HumanCustom => "Human: Custom",
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn description(&self) -> &str {
-        match self {
-            BeingType::Unknown => "Schumann resonance + harmonic frequencies",
-            BeingType::HumanFocus10 => "Mind awake, body asleep (4.1Hz theta)",
-            BeingType::HumanFocus12 => "Expanded awareness (1.5Hz delta)",
-            BeingType::HumanFocus15 => "No time (4.8Hz theta, 300Hz carriers)",
-            BeingType::HumanFocus21 => "Bridge to other realities (4.0Hz theta/delta)",
-            BeingType::HumanCustom => "Custom binaural beat frequency",
-        }
-    }
-
     /// Get the default preset filename for this BeingType
     pub fn default_preset_filename(&self) -> &'static str {
         match self {
@@ -185,7 +161,8 @@ pub struct CoherenceSynth {
     gamma_duration: f32, // How long the current gamma burst has been active
 
     // Multi-phase progression (Monroe-style session structure)
-    session_timer: f32,      // Total elapsed time since session start
+    // Use u64 sample counter to avoid f32 precision loss at high sample counts
+    session_samples: u64,    // Total samples since session start
     current_phase: SessionPhase, // Current phase of the session
 }
 
@@ -200,11 +177,22 @@ impl CoherenceSynth {
             gamma_timer: 0.0,
             gamma_active: false,
             gamma_duration: 0.0,
-            session_timer: 0.0,
+            session_samples: 0,
             current_phase: SessionPhase::Startup,
         }
     }
+
+    /// Get session timer in seconds (computed from sample count)
+    fn session_timer_secs(&self) -> f32 {
+        self.session_samples as f32 / self.sample_rate
+    }
     
+    /// Update session timer (called every sample regardless of being type)
+    pub fn update_timer(&mut self, params: &CoherenceParams) {
+        self.session_samples += 1;
+        self.update_session_phase(params);
+    }
+
     /// Generate next stereo sample pair
     pub fn next_sample(&mut self, params: &CoherenceParams) -> (f32, f32) {
         if !params.enabled {
@@ -213,10 +201,6 @@ impl CoherenceSynth {
 
         let dt = 1.0 / self.sample_rate;
         let pi2 = 2.0 * std::f32::consts::PI;
-
-        // Multi-phase progression: update session timer and phase
-        self.session_timer += dt;
-        self.update_session_phase(params);
         let phase_volume = self.get_phase_volume_multiplier(params);
 
         // Gamma burst interruption for Focus 10 (Monroe technique)
@@ -283,7 +267,7 @@ impl CoherenceSynth {
 
     /// Update session phase based on elapsed time (using configurable timings from params)
     fn update_session_phase(&mut self, params: &CoherenceParams) {
-        let minutes = self.session_timer / 60.0;
+        let minutes = self.session_timer_secs() / 60.0;
 
         self.current_phase = if minutes < params.startup_end_min() {
             SessionPhase::Startup
@@ -302,7 +286,7 @@ impl CoherenceSynth {
     /// Stabilization: 1.0 (sustained)
     /// Return: 1.0 -> 0.3 (gentle ramp down)
     fn get_phase_volume_multiplier(&self, params: &CoherenceParams) -> f32 {
-        let minutes = self.session_timer / 60.0;
+        let minutes = self.session_timer_secs() / 60.0;
 
         match self.current_phase {
             SessionPhase::Startup => {
@@ -331,7 +315,6 @@ impl CoherenceSynth {
     }
 
     /// Reset all phases (useful when changing presets)
-    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.phase_left = 0.0;
         self.phase_right = 0.0;
@@ -340,12 +323,12 @@ impl CoherenceSynth {
         self.gamma_timer = 0.0;
         self.gamma_active = false;
         self.gamma_duration = 0.0;
-        self.session_timer = 0.0;
+        self.session_samples = 0;
         self.current_phase = SessionPhase::Startup;
     }
 
     /// Get current session information (for UI display)
     pub fn get_session_info(&self) -> (f32, SessionPhase) {
-        (self.session_timer, self.current_phase)
+        (self.session_timer_secs(), self.current_phase)
     }
 }

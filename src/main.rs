@@ -280,9 +280,11 @@ impl App {
                             let mut params = self.params.lock();
                             let stream_enabled = params.stream_enabled;
                             let stream_port = params.stream_port;
+                            let current_version = params.preset_version;
 
                             loaded.stream_enabled = stream_enabled;
                             loaded.stream_port = stream_port;
+                            loaded.preset_version = current_version.wrapping_add(1);
 
                             *params = loaded;
                             drop(params);
@@ -646,9 +648,11 @@ impl App {
                         let mut params = self.params.lock();
                         let stream_enabled = params.stream_enabled;
                         let stream_port = params.stream_port;
+                        let current_version = params.preset_version;
 
                         loaded.stream_enabled = stream_enabled;
                         loaded.stream_port = stream_port;
+                        loaded.preset_version = current_version.wrapping_add(1);
 
                         *params = loaded;
                         drop(params);
@@ -934,22 +938,65 @@ where
     let mut synth = Synthesizer::new(sample_rate);
     let channels = config.channels as usize;
 
+    // Preset change tracking
+    let mut last_preset_version: u32 = 0;
+    let mut crossfade_samples_remaining: usize = 0;
+    let crossfade_duration_samples = (sample_rate * 0.05) as usize; // 50ms crossfade
+
+    // Cache last params to use when lock contention occurs (realtime audio best practice)
+    let mut cached_params = AudioParams::default();
+
     let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
 
     let stream = device.build_output_stream(
         config,
         move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
-            // We lock once per buffer to get latest params. 
-            // For smoother updates we could copy the params, but locking per sample is too slow.
-            // Actually, we should probably lock just to copy the struct and then run the loop.
-            let p = { params.lock().clone() }; // Copy AudioParams (it needs to be Copy/Clone or manual copy)
-            
-            for frame in data.chunks_mut(channels) {
-                let (left_sample_f32, right_sample_f32) = synth.next_sample(&p);
+            // Use try_lock to avoid blocking if UI thread holds the lock
+            // If lock fails, use cached params from last successful lock
+            let p = match params.try_lock() {
+                Some(guard) => {
+                    cached_params = guard.clone();
+                    cached_params.clone()
+                }
+                None => {
+                    // Lock contention - use cached params to avoid glitch
+                    cached_params.clone()
+                }
+            };
 
-                // Push to streaming buffer if enabled
+            // Detect preset change
+            if p.preset_version != last_preset_version {
+                // Preset changed - reset synthesizer state and flush streaming buffer
+                synth.reset();
+                stream_buffer.flush();
+
+                // Start crossfade
+                crossfade_samples_remaining = crossfade_duration_samples;
+                last_preset_version = p.preset_version;
+            }
+
+            // Collect samples for batch streaming buffer write
+            let mut stream_samples: Vec<(f32, f32)> = if p.stream_enabled {
+                Vec::with_capacity(data.len() / channels)
+            } else {
+                Vec::new()
+            };
+
+            for frame in data.chunks_mut(channels) {
+                let (mut left_sample_f32, mut right_sample_f32) = synth.next_sample(&p);
+
+                // Apply crossfade if active
+                if crossfade_samples_remaining > 0 {
+                    let progress = 1.0 - (crossfade_samples_remaining as f32 / crossfade_duration_samples as f32);
+                    let fade_multiplier = progress; // Linear fade-in from 0.0 to 1.0
+                    left_sample_f32 *= fade_multiplier;
+                    right_sample_f32 *= fade_multiplier;
+                    crossfade_samples_remaining -= 1;
+                }
+
+                // Collect for batch streaming (avoid per-sample lock)
                 if p.stream_enabled {
-                    stream_buffer.push_samples(left_sample_f32, right_sample_f32);
+                    stream_samples.push((left_sample_f32, right_sample_f32));
                 }
 
                 if channels >= 2 {
@@ -963,11 +1010,18 @@ where
                 }
             }
 
-            // Update session info in params (once per buffer for efficiency)
+            // Batch push to streaming buffer (single lock acquisition)
+            if !stream_samples.is_empty() {
+                stream_buffer.push_samples_batch(&stream_samples);
+            }
+
+            // Update session info using try_lock to avoid blocking audio
             let (session_timer, session_phase) = synth.coherence.get_session_info();
-            let mut params_write = params.lock();
-            params_write.session_timer = session_timer;
-            params_write.session_phase = session_phase;
+            if let Some(mut params_write) = params.try_lock() {
+                params_write.session_timer = session_timer;
+                params_write.session_phase = session_phase;
+            }
+            // If lock fails, skip update this callback - UI will get updated next time
         },
         err_fn,
         None,
