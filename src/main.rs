@@ -802,8 +802,28 @@ fn main() -> Result<(), Box<dyn Error>> {
     // 1. Audio Setup
     let host = cpal::default_host();
     let device = host.default_output_device().expect("no output device available");
-    let config = device.default_output_config()?;
-    let sample_rate = config.sample_rate() as f32;
+    let supported_config = device.default_output_config()?;
+    let sample_rate = supported_config.sample_rate() as f32;
+
+    // Request explicit buffer size for lower latency (fall back to default)
+    let config = {
+        let mut cfg: cpal::StreamConfig = supported_config.clone().into();
+        cfg.buffer_size = cpal::BufferSize::Fixed(PREFERRED_BUFFER_FRAMES);
+        // Verify the device accepts this — rebuild with default if not
+        match device.build_output_stream(
+            &cfg,
+            |_data: &mut [f32], _: &cpal::OutputCallbackInfo| {},
+            |_| {},
+            None,
+        ) {
+            Ok(_) => (), // Device accepts our buffer size
+            Err(_) => {
+                // Fall back to device default
+                cfg.buffer_size = cpal::BufferSize::Default;
+            }
+        }
+        cfg
+    };
 
     let mut initial_params = AudioParams::default();
     let mut loaded_preset_name: Option<String> = None;
@@ -887,10 +907,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Run audio in a separate thread (handled by cpal stream)
 
-    let stream = match config.sample_format() {
-        cpal::SampleFormat::F32 => run::<f32>(&device, &config.into(), audio_params, stream_buffer_for_audio, sample_rate),
-        cpal::SampleFormat::I16 => run::<i16>(&device, &config.into(), audio_params, stream_buffer_for_audio, sample_rate),
-        cpal::SampleFormat::U16 => run::<u16>(&device, &config.into(), audio_params, stream_buffer_for_audio, sample_rate),
+    let stream = match supported_config.sample_format() {
+        cpal::SampleFormat::F32 => run::<f32>(&device, &config, audio_params, stream_buffer_for_audio, sample_rate),
+        cpal::SampleFormat::I16 => run::<i16>(&device, &config, audio_params, stream_buffer_for_audio, sample_rate),
+        cpal::SampleFormat::U16 => run::<u16>(&device, &config, audio_params, stream_buffer_for_audio, sample_rate),
         _ => panic!("Unsupported sample format"),
     }?;
 
@@ -946,6 +966,10 @@ where
     // Cache last params to use when lock contention occurs (realtime audio best practice)
     let mut cached_params = AudioParams::default();
 
+    // Pre-allocate streaming sample buffer — reused each callback via clear()
+    // Avoids heap allocation in the audio callback hot path
+    let mut stream_samples: Vec<(f32, f32)> = Vec::with_capacity(1024);
+
     let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
 
     let stream = device.build_output_stream(
@@ -953,16 +977,11 @@ where
         move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
             // Use try_lock to avoid blocking if UI thread holds the lock
             // If lock fails, use cached params from last successful lock
-            let p = match params.try_lock() {
-                Some(guard) => {
-                    cached_params = guard.clone();
-                    cached_params.clone()
-                }
-                None => {
-                    // Lock contention - use cached params to avoid glitch
-                    cached_params.clone()
-                }
-            };
+            if let Some(guard) = params.try_lock() {
+                cached_params = guard.clone_for_audio();
+            }
+            // Always work from cached_params (avoids a second clone)
+            let p = &cached_params;
 
             // Detect preset change
             if p.preset_version != last_preset_version {
@@ -975,20 +994,17 @@ where
                 last_preset_version = p.preset_version;
             }
 
-            // Collect samples for batch streaming buffer write
-            let mut stream_samples: Vec<(f32, f32)> = if p.stream_enabled {
-                Vec::with_capacity(data.len() / channels)
-            } else {
-                Vec::new()
-            };
+            // Reuse pre-allocated buffer (clear keeps capacity, zero allocs)
+            stream_samples.clear();
 
             for frame in data.chunks_mut(channels) {
-                let (mut left_sample_f32, mut right_sample_f32) = synth.next_sample(&p);
+                let (mut left_sample_f32, mut right_sample_f32) = synth.next_sample(p);
 
-                // Apply crossfade if active
+                // Apply equal-power crossfade if active
                 if crossfade_samples_remaining > 0 {
                     let progress = 1.0 - (crossfade_samples_remaining as f32 / crossfade_duration_samples as f32);
-                    let fade_multiplier = progress; // Linear fade-in from 0.0 to 1.0
+                    // Equal-power curve: sin(progress * π/2) — maintains constant perceived loudness
+                    let fade_multiplier = (progress * std::f32::consts::FRAC_PI_2).sin();
                     left_sample_f32 *= fade_multiplier;
                     right_sample_f32 *= fade_multiplier;
                     crossfade_samples_remaining -= 1;

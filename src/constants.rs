@@ -243,6 +243,23 @@ pub const ALPHA_MAX_HZ: f32 = 12.0;
 pub const BETA_MAX_HZ: f32 = 30.0;
 // Gamma: > 30 Hz
 
+// === Audio Buffer ===
+/// Preferred audio buffer size (frames). 256 @ 48kHz = 5.3ms latency.
+pub const PREFERRED_BUFFER_FRAMES: u32 = 256;
+
+// === DC Offset Removal ===
+/// Single-pole high-pass filter coefficient (~5Hz cutoff @ 48kHz)
+/// alpha = 1 / (1 + 2*pi*fc/fs) ≈ 0.9993 for 5Hz @ 48kHz
+pub const DC_FILTER_ALPHA: f32 = 0.9993;
+
+// === Soft Clipping ===
+/// Threshold below which signal passes clean
+pub const SOFT_CLIP_THRESHOLD: f32 = 0.8;
+/// Headroom above threshold for saturation curve
+pub const SOFT_CLIP_KNEE: f32 = 0.2;
+/// Steepness of the tanh saturation above threshold
+pub const SOFT_CLIP_STEEPNESS: f32 = 5.0;
+
 // === Polling and Timing ===
 /// Event polling interval (milliseconds)
 pub const EVENT_POLL_INTERVAL_MS: u64 = 50;

@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use crate::constants::*;
+use crate::utils::fast_sin;
 
 /// Session phase for progressive entrainment (Monroe-style multi-phase structure)
 #[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Debug)]
@@ -239,20 +240,20 @@ impl CoherenceSynth {
         self.phase_right = (self.phase_right + right_carrier * dt * pi2) % pi2;
         
         // Generate carrier tones (pure sine waves for best binaural effect)
-        let mut left = self.phase_left.sin();
-        let mut right = self.phase_right.sin();
+        let mut left = fast_sin(self.phase_left);
+        let mut right = fast_sin(self.phase_right);
         
         // Add harmonics if enabled (like in real tapes)
         if params.harmonic_220hz {
             self.phase_harmonic_220 = (self.phase_harmonic_220 + HARMONIC_220_HZ * dt * pi2) % pi2;
-            let harmonic = self.phase_harmonic_220.sin() * HARMONIC_220_RELATIVE_VOL;
+            let harmonic = fast_sin(self.phase_harmonic_220) * HARMONIC_220_RELATIVE_VOL;
             left += harmonic;
             right += harmonic;
         }
 
         if params.harmonic_495hz {
             self.phase_harmonic_495 = (self.phase_harmonic_495 + HARMONIC_495_HZ * dt * pi2) % pi2;
-            let harmonic = self.phase_harmonic_495.sin() * HARMONIC_495_RELATIVE_VOL;
+            let harmonic = fast_sin(self.phase_harmonic_495) * HARMONIC_495_RELATIVE_VOL;
             left += harmonic;
             right += harmonic;
         }

@@ -4,7 +4,7 @@ use rand::rngs::SmallRng;
 use serde::{Deserialize, Serialize};
 use crate::coherence::CoherenceParams;
 use crate::constants::*;
-use crate::utils::generate_waveform;
+use crate::utils::{generate_waveform, fast_sin, soft_clip};
 
 #[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Debug)]
 pub enum SignalType {
@@ -158,6 +158,47 @@ impl Default for AudioParams {
     }
 }
 
+impl AudioParams {
+    /// Clone only the numeric fields needed for audio synthesis.
+    /// Avoids heap-allocating String fields (preset_title, preset_description)
+    /// which are only needed for UI display.
+    pub fn clone_for_audio(&self) -> Self {
+        Self {
+            preset_title: None,
+            preset_description: None,
+            experimental: None,
+            carrier_vol: self.carrier_vol,
+            carrier_type: self.carrier_type,
+            harmonic_vol: self.harmonic_vol,
+            harmonic_type: self.harmonic_type,
+            ping_vol: self.ping_vol,
+            ping_type: self.ping_type,
+            ping_freq_hz: self.ping_freq_hz,
+            chirp_vol: self.chirp_vol,
+            chirp_type: self.chirp_type,
+            pad_vol: self.pad_vol,
+            pad_type: self.pad_type,
+            breath_vol: self.breath_vol,
+            breath_type: self.breath_type,
+            master_vol: self.master_vol,
+            playing: self.playing,
+            rf_enabled: self.rf_enabled,
+            rf_freq_hz: self.rf_freq_hz,
+            rf_gain: self.rf_gain,
+            rf_mode: self.rf_mode,
+            rf_pulse_type: self.rf_pulse_type,
+            rf_detected: self.rf_detected,
+            lock_signal_layer: self.lock_signal_layer,
+            stream_enabled: self.stream_enabled,
+            stream_port: self.stream_port,
+            coherence: self.coherence,
+            session_timer: self.session_timer,
+            session_phase: self.session_phase,
+            preset_version: self.preset_version,
+        }
+    }
+}
+
 /// Generates Neural Coherence binaural beats for left and right channels.
 /// Binaural beats require HEADPHONES to be effective, as they rely on
 /// projecting slightly different frequencies to each ear.
@@ -187,6 +228,12 @@ pub struct Synthesizer {
 
     // Neural Coherence binaural beat generator (public for session info access)
     pub coherence: crate::coherence::CoherenceSynth,
+
+    // DC offset removal high-pass filter state (per channel)
+    dc_prev_in_l: f32,
+    dc_prev_out_l: f32,
+    dc_prev_in_r: f32,
+    dc_prev_out_r: f32,
 }
 
 impl Synthesizer {
@@ -204,6 +251,10 @@ impl Synthesizer {
             chirp_timer: 0.0,
             rng: SmallRng::from_os_rng(),
             coherence: crate::coherence::CoherenceSynth::new(sample_rate),
+            dc_prev_in_l: 0.0,
+            dc_prev_out_l: 0.0,
+            dc_prev_in_r: 0.0,
+            dc_prev_out_r: 0.0,
         }
     }
     
@@ -239,9 +290,24 @@ impl Synthesizer {
             (0.0, 0.0)
         };
         
-        // Final stereo mix
-        let left_out = (signal_mixed + coherence_left) * params.master_vol;
-        let right_out = (signal_mixed + coherence_right) * params.master_vol;
+        // Final stereo mix with soft clipping and DC offset removal
+        let left_raw = (signal_mixed + coherence_left) * params.master_vol;
+        let right_raw = (signal_mixed + coherence_right) * params.master_vol;
+
+        // Soft clip to prevent harsh digital distortion
+        let left_clipped = soft_clip(left_raw);
+        let right_clipped = soft_clip(right_raw);
+
+        // DC offset removal: y[n] = α * (y[n-1] + x[n] - x[n-1])
+        let left_out = DC_FILTER_ALPHA
+            * (self.dc_prev_out_l + left_clipped - self.dc_prev_in_l);
+        self.dc_prev_in_l = left_clipped;
+        self.dc_prev_out_l = left_out;
+
+        let right_out = DC_FILTER_ALPHA
+            * (self.dc_prev_out_r + right_clipped - self.dc_prev_in_r);
+        self.dc_prev_in_r = right_clipped;
+        self.dc_prev_out_r = right_out;
 
         (left_out, right_out)
     }
@@ -257,15 +323,15 @@ impl Synthesizer {
         self.phase_7_83hz = (self.phase_7_83hz + SCHUMANN_RESONANCE_HZ * dt * pi2) % pi2;
 
         components.carrier = match params.carrier_type {
-            SignalType::SchumannAM => self.phase_100hz.sin() * (AM_MODULATION_MIN + AM_MODULATION_MIN * self.phase_7_83hz.sin()),
+            SignalType::SchumannAM => fast_sin(self.phase_100hz) * (AM_MODULATION_MIN + AM_MODULATION_MIN * fast_sin(self.phase_7_83hz)),
             SignalType::SchumannFM => {
-                let _mod_freq = CARRIER_BASE_HZ + FM_MODULATION_RANGE_HZ * self.phase_7_83hz.sin();
-                self.phase_100hz.sin()
+                let _mod_freq = CARRIER_BASE_HZ + FM_MODULATION_RANGE_HZ * fast_sin(self.phase_7_83hz);
+                fast_sin(self.phase_100hz)
             },
-            SignalType::Schumann783AM => self.phase_783hz.sin() * (AM_MODULATION_MIN + AM_MODULATION_MIN * self.phase_7_83hz.sin()),
-            SignalType::Sine100Hz => self.phase_100hz.sin(),
-            SignalType::Square => if self.phase_100hz.sin() >= 0.0 { 1.0 } else { -1.0 },
-            _ => self.phase_100hz.sin(),
+            SignalType::Schumann783AM => fast_sin(self.phase_783hz) * (AM_MODULATION_MIN + AM_MODULATION_MIN * fast_sin(self.phase_7_83hz)),
+            SignalType::Sine100Hz => fast_sin(self.phase_100hz),
+            SignalType::Square => if fast_sin(self.phase_100hz) >= 0.0 { 1.0 } else { -1.0 },
+            _ => fast_sin(self.phase_100hz),
         };
 
         // 2. Harmonic: 528 Hz (Solfeggio Mi)
@@ -286,7 +352,7 @@ impl Synthesizer {
         if self.chirp_timer < CHIRP_DURATION_SECS {
             match params.chirp_type {
                 SignalType::OrganicChirp => {
-                    let fm_mod = (self.chirp_timer * CHIRP_FM_MOD_FACTOR).sin() * CHIRP_FM_MOD_RANGE_HZ;
+                    let fm_mod = fast_sin(self.chirp_timer * CHIRP_FM_MOD_FACTOR) * CHIRP_FM_MOD_RANGE_HZ;
                     let freq = CHIRP_BASE_HZ + fm_mod;
                     self.phase_2_5khz = (self.phase_2_5khz + freq * dt * pi2) % pi2;
                 },
@@ -305,12 +371,12 @@ impl Synthesizer {
             let envelope = if progress < 0.5 { progress * 2.0 } else { 2.0 * (1.0 - progress) };
             
             let base = match params.chirp_type {
-                 SignalType::Square => if self.phase_2_5khz.sin() >= 0.0 { 1.0 } else { -1.0 },
+                 SignalType::Square => if fast_sin(self.phase_2_5khz) >= 0.0 { 1.0 } else { -1.0 },
                  SignalType::Saw => {
                      let x = self.phase_2_5khz / pi2;
                      2.0 * (x - (x + 0.5).floor())
                  },
-                 _ => self.phase_2_5khz.sin()
+                 _ => fast_sin(self.phase_2_5khz)
             };
             
             components.chirp = base * envelope;
@@ -328,12 +394,12 @@ impl Synthesizer {
 
         components.breath = match params.breath_type {
             SignalType::LfoBreathing => {
-                 let breath_env = (AM_MODULATION_MIN + AM_MODULATION_MIN * self.breath_phase.sin()).powf(2.0);
-                 noise * breath_env
+                 let breath_env = AM_MODULATION_MIN + AM_MODULATION_MIN * fast_sin(self.breath_phase);
+                 noise * breath_env * breath_env
             },
             SignalType::WhiteNoise => noise,
             SignalType::PinkNoise => noise * PINK_NOISE_FACTOR,
-            SignalType::Sine => self.breath_phase.sin(), // LFO drone
+            SignalType::Sine => fast_sin(self.breath_phase), // LFO drone
             _ => noise
         };
 
@@ -349,7 +415,7 @@ impl Synthesizer {
         // For RF, we use a TRUE 7.83Hz envelope, not the AM trick for audio.
         let pi2 = 2.0 * std::f32::consts::PI;
         self.phase_7_83hz = (self.phase_7_83hz + SCHUMANN_RESONANCE_HZ * dt * pi2) % pi2;
-        let schumann_envelope = AM_MODULATION_MIN + AM_MODULATION_MIN * self.phase_7_83hz.sin();
+        let schumann_envelope = AM_MODULATION_MIN + AM_MODULATION_MIN * fast_sin(self.phase_7_83hz);
         
         let carrier_signal = schumann_envelope;
 
@@ -383,6 +449,12 @@ impl Synthesizer {
         self.phase_2_5khz = 0.0;
         self.breath_phase = 0.0;
         self.chirp_timer = 0.0;
+
+        // Reset DC filter state
+        self.dc_prev_in_l = 0.0;
+        self.dc_prev_out_l = 0.0;
+        self.dc_prev_in_r = 0.0;
+        self.dc_prev_out_r = 0.0;
 
         // Reset coherence synthesizer (session timer, gamma bursts, etc.)
         self.coherence.reset();
