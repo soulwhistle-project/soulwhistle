@@ -60,3 +60,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: soulwhistle-linux-x86_64.tar.gz
+
+      - name: Publish to crates.io
+        if: startsWith(github.ref, 'refs/tags/')
+        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
