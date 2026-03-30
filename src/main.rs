@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::fs::File;
-use std::io::Write;
+use std::io::{Write, Seek, SeekFrom};
 use std::sync::Arc;
 use parking_lot::Mutex;
 use crossterm::{
@@ -12,7 +12,7 @@ use ratatui::{
     backend::{Backend, CrosstermBackend},
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
-    text::Line,
+    text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Frame, Terminal,
 };
@@ -52,6 +52,27 @@ struct PresetInfo {
     experimental: Option<bool>,
 }
 
+/// Shared state for WAV recording between audio callback and UI
+struct RecordingState {
+    active: bool,
+    writer: Option<std::io::BufWriter<File>>,
+    samples_written: u32,
+    sample_rate: u32,
+    filepath: Option<String>,
+}
+
+impl RecordingState {
+    fn new() -> Self {
+        Self {
+            active: false,
+            writer: None,
+            samples_written: 0,
+            sample_rate: 48000,
+            filepath: None,
+        }
+    }
+}
+
 struct App {
     mode: AppMode,
     params: Arc<Mutex<AudioParams>>,
@@ -78,6 +99,9 @@ struct App {
 
     // RF safety
     rf_disclaimer_shown: bool,
+
+    // WAV recording
+    recording: Arc<Mutex<RecordingState>>,
 }
 
 struct ChannelInfo {
@@ -117,7 +141,7 @@ enum ChannelId {
 }
 
 impl App {
-    fn new(params: Arc<Mutex<AudioParams>>, stream_client_count: Arc<Mutex<usize>>) -> Self {
+    fn new(params: Arc<Mutex<AudioParams>>, stream_client_count: Arc<Mutex<usize>>, recording: Arc<Mutex<RecordingState>>) -> Self {
         let mut state = ListState::default();
         state.select(Some(0));
 
@@ -170,6 +194,7 @@ impl App {
             preset_state,
             current_preset: None,
             stream_client_count,
+            recording,
         }
     }
 
@@ -185,14 +210,26 @@ impl App {
     }
 
     // --- Navigation ---
+    /// Check if a visible index points to a spacer (should be skipped)
+    fn is_spacer(&self, visual_idx: usize) -> bool {
+        if visual_idx >= self.visible_channel_indices.len() {
+            return false;
+        }
+        let ch_idx = self.visible_channel_indices[visual_idx];
+        ch_idx < self.channels.len() && matches!(self.channels[ch_idx].id, ChannelId::Spacer)
+    }
+
     fn next(&mut self) {
         match self.mode {
             AppMode::Mixer => {
-                // Navigate through visible items only
                 if self.visible_channel_indices.is_empty() { return; }
-                let current_visual_idx = self.state.selected().unwrap_or(0);
-                let next_visual_idx = cycle_index(current_visual_idx, self.visible_channel_indices.len(), 1);
-                self.state.select(Some(next_visual_idx));
+                let len = self.visible_channel_indices.len();
+                let mut idx = self.state.selected().unwrap_or(0);
+                for _ in 0..len {
+                    idx = cycle_index(idx, len, 1);
+                    if !self.is_spacer(idx) { break; }
+                }
+                self.state.select(Some(idx));
             },
             AppMode::PresetSelect => {
                 if self.preset_list.is_empty() { return; }
@@ -205,11 +242,14 @@ impl App {
     fn previous(&mut self) {
         match self.mode {
             AppMode::Mixer => {
-                // Navigate through visible items only
                 if self.visible_channel_indices.is_empty() { return; }
-                let current_visual_idx = self.state.selected().unwrap_or(0);
-                let prev_visual_idx = cycle_index(current_visual_idx, self.visible_channel_indices.len(), -1);
-                self.state.select(Some(prev_visual_idx));
+                let len = self.visible_channel_indices.len();
+                let mut idx = self.state.selected().unwrap_or(0);
+                for _ in 0..len {
+                    idx = cycle_index(idx, len, -1);
+                    if !self.is_spacer(idx) { break; }
+                }
+                self.state.select(Some(idx));
             },
             AppMode::PresetSelect => {
                 if self.preset_list.is_empty() { return; }
@@ -710,6 +750,97 @@ impl App {
         }
     }
 
+    fn toggle_recording(&mut self, sample_rate: u32) {
+        let mut rec = self.recording.lock();
+        if rec.active {
+            // Stop recording — finalize WAV header
+            let data_size = rec.samples_written * WAV_BLOCK_ALIGN as u32;
+            let file_size = data_size + 36; // 44 byte header - 8 byte RIFF preamble
+            if let Some(ref mut writer) = rec.writer {
+                // Patch RIFF size (offset 4)
+                if writer.seek(SeekFrom::Start(4)).is_ok() {
+                    let _ = writer.write_all(&file_size.to_le_bytes());
+                }
+                // Patch data chunk size (offset 40)
+                if writer.seek(SeekFrom::Start(40)).is_ok() {
+                    let _ = writer.write_all(&data_size.to_le_bytes());
+                }
+                let _ = writer.flush();
+            }
+            let path = rec.filepath.take().unwrap_or_default();
+            rec.active = false;
+            rec.writer = None;
+            rec.samples_written = 0;
+            self.status_msg = Some((
+                format!("Recording saved: {}", path),
+                std::time::Instant::now(),
+            ));
+        } else {
+            // Start recording — create WAV file
+            let recordings_dir = get_presets_dir().parent()
+                .unwrap_or(std::path::Path::new("."))
+                .join("recordings");
+            if let Err(e) = std::fs::create_dir_all(&recordings_dir) {
+                self.status_msg = Some((
+                    format!("Error creating recordings dir: {}", e),
+                    std::time::Instant::now(),
+                ));
+                return;
+            }
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let ts = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_secs();
+            let filename = format!("rec_{}.wav", ts);
+            let path = recordings_dir.join(&filename);
+            match File::create(&path) {
+                Ok(file) => {
+                    let mut writer = std::io::BufWriter::new(file);
+                    // Write WAV header with placeholder sizes
+                    let mut header = Vec::with_capacity(44);
+                    header.extend_from_slice(b"RIFF");
+                    header.extend_from_slice(&0u32.to_le_bytes()); // placeholder
+                    header.extend_from_slice(b"WAVE");
+                    header.extend_from_slice(b"fmt ");
+                    header.extend_from_slice(&16u32.to_le_bytes());
+                    header.extend_from_slice(&WAV_PCM_FORMAT.to_le_bytes());
+                    header.extend_from_slice(&WAV_STEREO_CHANNELS.to_le_bytes());
+                    header.extend_from_slice(&sample_rate.to_le_bytes());
+                    header.extend_from_slice(
+                        &(sample_rate * WAV_BLOCK_ALIGN as u32).to_le_bytes(),
+                    );
+                    header.extend_from_slice(&WAV_BLOCK_ALIGN.to_le_bytes());
+                    header.extend_from_slice(&WAV_BITS_PER_SAMPLE.to_le_bytes());
+                    header.extend_from_slice(b"data");
+                    header.extend_from_slice(&0u32.to_le_bytes()); // placeholder
+                    if writer.write_all(&header).is_err() {
+                        self.status_msg = Some((
+                            "Failed to write WAV header".to_string(),
+                            std::time::Instant::now(),
+                        ));
+                        return;
+                    }
+                    rec.active = true;
+                    rec.writer = Some(writer);
+                    rec.samples_written = 0;
+                    rec.sample_rate = sample_rate;
+                    rec.filepath = Some(path.display().to_string());
+                    self.status_msg = Some((
+                        format!("Recording to {}", filename),
+                        std::time::Instant::now(),
+                    ));
+                }
+                Err(e) => {
+                    self.status_msg = Some((
+                        format!("Error creating recording: {}", e),
+                        std::time::Instant::now(),
+                    ));
+                }
+            }
+        }
+    }
+
     fn toggle_collapse(&mut self) {
         if let Some(ui_idx) = self.state.selected() {
             // Map UI index to original channel index
@@ -805,10 +936,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let supported_config = device.default_output_config()?;
     let sample_rate = supported_config.sample_rate() as f32;
 
-    // Request explicit buffer size for lower latency (fall back to default)
+    // Request explicit buffer size (env override for Bluetooth/troubleshooting)
+    let buffer_frames = std::env::var("SOULWHISTLE_BUFFER_FRAMES")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(DEFAULT_BUFFER_FRAMES);
     let config = {
         let mut cfg: cpal::StreamConfig = supported_config.clone().into();
-        cfg.buffer_size = cpal::BufferSize::Fixed(PREFERRED_BUFFER_FRAMES);
+        cfg.buffer_size = cpal::BufferSize::Fixed(buffer_frames);
         // Verify the device accepts this — rebuild with default if not
         match device.build_output_stream(
             &cfg,
@@ -865,6 +1000,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let stream_params = params.clone();
     let (error_tx, error_rx) = std::sync::mpsc::channel::<String>();
 
+    // Create recording state (shared between audio callback and UI)
+    let recording_state = Arc::new(Mutex::new(RecordingState::new()));
+    let recording_for_audio = recording_state.clone();
+
     // Create streaming buffer
     let stream_buffer = Arc::new(AudioRingBuffer::new(sample_rate as u32, STREAM_BUFFER_DURATION_MS));
     let stream_buffer_for_audio = stream_buffer.clone();
@@ -908,9 +1047,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Run audio in a separate thread (handled by cpal stream)
 
     let stream = match supported_config.sample_format() {
-        cpal::SampleFormat::F32 => run::<f32>(&device, &config, audio_params, stream_buffer_for_audio, sample_rate),
-        cpal::SampleFormat::I16 => run::<i16>(&device, &config, audio_params, stream_buffer_for_audio, sample_rate),
-        cpal::SampleFormat::U16 => run::<u16>(&device, &config, audio_params, stream_buffer_for_audio, sample_rate),
+        cpal::SampleFormat::F32 => run::<f32>(&device, &config, audio_params, stream_buffer_for_audio, recording_for_audio.clone(), sample_rate),
+        cpal::SampleFormat::I16 => run::<i16>(&device, &config, audio_params, stream_buffer_for_audio, recording_for_audio.clone(), sample_rate),
+        cpal::SampleFormat::U16 => run::<u16>(&device, &config, audio_params, stream_buffer_for_audio, recording_for_audio, sample_rate),
         _ => panic!("Unsupported sample format"),
     }?;
 
@@ -923,11 +1062,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(params, stream_client_count_for_app);
+    let mut app = App::new(params, stream_client_count_for_app, recording_state);
     app.current_preset = loaded_preset_name;
     app.refresh_presets();
     
-    let res = run_app(&mut terminal, app, error_rx);
+    let res = run_app(&mut terminal, app, error_rx, sample_rate as u32);
 
     // Restore terminal
     disable_raw_mode()?;
@@ -950,6 +1089,7 @@ fn run<T>(
     config: &cpal::StreamConfig,
     params: Arc<Mutex<AudioParams>>,
     stream_buffer: Arc<AudioRingBuffer>,
+    recording: Arc<Mutex<RecordingState>>,
     sample_rate: f32,
 ) -> Result<cpal::Stream, anyhow::Error>
 where
@@ -969,6 +1109,9 @@ where
     // Pre-allocate streaming sample buffer — reused each callback via clear()
     // Avoids heap allocation in the audio callback hot path
     let mut stream_samples: Vec<(f32, f32)> = Vec::with_capacity(1024);
+
+    // Pre-allocate recording PCM buffer (i16 LE pairs)
+    let mut rec_buf: Vec<u8> = Vec::with_capacity(4096);
 
     let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
 
@@ -997,6 +1140,12 @@ where
             // Reuse pre-allocated buffer (clear keeps capacity, zero allocs)
             stream_samples.clear();
 
+            // Check recording state once per callback (avoid per-sample lock)
+            let is_recording = recording.try_lock()
+                .map(|r| r.active)
+                .unwrap_or(false);
+            let collect_samples = p.stream_enabled || is_recording;
+
             for frame in data.chunks_mut(channels) {
                 let (mut left_sample_f32, mut right_sample_f32) = synth.next_sample(p);
 
@@ -1010,8 +1159,8 @@ where
                     crossfade_samples_remaining -= 1;
                 }
 
-                // Collect for batch streaming (avoid per-sample lock)
-                if p.stream_enabled {
+                // Collect for batch streaming and/or recording (avoid per-sample lock)
+                if collect_samples {
                     stream_samples.push((left_sample_f32, right_sample_f32));
                 }
 
@@ -1031,6 +1180,25 @@ where
                 stream_buffer.push_samples_batch(&stream_samples);
             }
 
+            // Write to WAV recording if active (try_lock to avoid blocking)
+            if is_recording && !stream_samples.is_empty() {
+                if let Some(mut rec) = recording.try_lock() {
+                    if rec.active {
+                        rec_buf.clear();
+                        for &(l, r) in &stream_samples {
+                            let li = (l.clamp(-1.0, 1.0) * PCM_I16_MAX) as i16;
+                            let ri = (r.clamp(-1.0, 1.0) * PCM_I16_MAX) as i16;
+                            rec_buf.extend_from_slice(&li.to_le_bytes());
+                            rec_buf.extend_from_slice(&ri.to_le_bytes());
+                        }
+                        if let Some(ref mut writer) = rec.writer {
+                            let _ = writer.write_all(&rec_buf);
+                        }
+                        rec.samples_written += (rec_buf.len() / 4) as u32;
+                    }
+                }
+            }
+
             // Update session info using try_lock to avoid blocking audio
             let (session_timer, session_phase) = synth.coherence.get_session_info();
             if let Some(mut params_write) = params.try_lock() {
@@ -1046,7 +1214,7 @@ where
     Ok(stream)
 }
 
-fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App, error_rx: std::sync::mpsc::Receiver<String>) -> std::io::Result<()> {
+fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App, error_rx: std::sync::mpsc::Receiver<String>, sample_rate: u32) -> std::io::Result<()> {
     loop {
         terminal.draw(|f| ui(f, &mut app))?;
 
@@ -1063,6 +1231,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App, error_rx: std::
                             match key.code {
                                 KeyCode::Char('q') => return Ok(()),
                                 KeyCode::Char('s') => app.save_preset(),
+                                KeyCode::Char('r') => app.toggle_recording(sample_rate),
                                 KeyCode::Char('l') => app.enter_preset_mode(),
                                 KeyCode::Char('o') => app.cycle_modulation(),
                                 KeyCode::Char('m') => app.toggle_mute(),
@@ -1156,31 +1325,57 @@ fn ui(f: &mut Frame, app: &mut App) {
         "RF: OFF".to_string()
     };
     
-    let line1 = format!(
+    let is_recording = app.recording.lock().active;
+    // Blink: 500ms on / 500ms off
+    let blink_on = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() % 1000 < 500;
+
+    let base_info = format!(
         "{} {} | Master: {:.0}% | {} {} | {}",
         playback_icon,
         if params.playing { "Playing" } else { "Paused" },
         params.master_vol * 100.0,
         being_icon,
         being_short,
-        rf_status
+        rf_status,
     );
-    
+
+    // Build line1 with styled spans (blinking red REC dot)
+    let mut line1_spans = vec![Span::raw(base_info)];
+    if is_recording {
+        if blink_on {
+            line1_spans.push(Span::styled(
+                " ● REC",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            line1_spans.push(Span::styled(
+                "   REC",
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+    }
+
     // Line 2: Keybindings | Status message
-    let mut line2 = "[m]ute [o]scillator [Space]pause [q]uit".to_string();
+    let mut line2_str = "[m]ute [o]scillator [r]ecord [Space]pause [q]uit".to_string();
 
     if let Some((text, time)) = &app.status_msg {
         // Show warnings (⚠️) for longer
         let timeout = if text.starts_with("⚠️") { STATUS_WARNING_TIMEOUT_SECS } else { STATUS_TIMEOUT_SECS };
         if time.elapsed() < std::time::Duration::from_secs(timeout) {
-            line2 = format!("[m]ute [o]scillator [Space]pause [q]uit | STATUS: {}", text);
+            line2_str = format!("[m]ute [o]scillator [r]ecord [Space]pause [q]uit | STATUS: {}", text);
         }
     }
-    
+
     drop(params); // Release lock
-    
-    let status_text = format!("{}\n{}", line1, line2);
-    let instructions = Paragraph::new(status_text)
+
+    let status_lines = vec![
+        Line::from(line1_spans),
+        Line::from(line2_str),
+    ];
+    let instructions = Paragraph::new(status_lines)
         .block(Block::default().borders(Borders::ALL));
     f.render_widget(instructions, chunks[1]);
 }
@@ -1259,6 +1454,17 @@ fn draw_mixer(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     // Get current params to display
     let params = app.params.lock(); // This lock is quick, just for reading
 
+    // ON AIR retro indicator (blinks when playing)
+    let blink_on = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() % 1000 < 600;
+    let on_air_style = if params.playing && blink_on {
+        Style::default().fg(Color::Red).bg(Color::Black).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray).bg(Color::Black)
+    };
+
     // Add header items
     let mut all_items = vec![
         ListItem::new(Line::from(" ███████╗ ██████╗ ██╗   ██╗██╗     ██╗    ██╗██╗  ██╗██╗███████╗████████╗██╗     ███████╗")),
@@ -1268,7 +1474,11 @@ fn draw_mixer(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
         ListItem::new(Line::from(" ███████║╚██████╔╝╚██████╔╝███████╗╚███╔███╔╝██║  ██║██║███████║   ██║   ███████╗███████╗")),
         ListItem::new(Line::from(" ╚══════╝ ╚═════╝  ╚═════╝ ╚══════╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝╚══════╝   ╚═╝   ╚══════╝╚══════╝")),
         ListItem::new(Line::from("")),
-        ListItem::new(Line::from("         Multi-Dimensional Communication System • Signal/Consciousness Explorer")),
+        ListItem::new(Line::from(vec![
+            Span::raw("         "),
+            Span::styled(" ■ ON AIR ■ ", on_air_style),
+            Span::raw("  Multi-Dimensional Communication System"),
+        ])),
         ListItem::new(Line::from("         ─────────────────────────────────────────────────────────────────────────────")),
     ];
 

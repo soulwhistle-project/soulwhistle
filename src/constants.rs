@@ -244,8 +244,9 @@ pub const BETA_MAX_HZ: f32 = 30.0;
 // Gamma: > 30 Hz
 
 // === Audio Buffer ===
-/// Preferred audio buffer size (frames). 256 @ 48kHz = 5.3ms latency.
-pub const PREFERRED_BUFFER_FRAMES: u32 = 256;
+/// Default audio buffer size (frames). 512 @ 48kHz = 10.6ms latency.
+/// Override with SOULWHISTLE_BUFFER_FRAMES env var (e.g. 1024 for Bluetooth).
+pub const DEFAULT_BUFFER_FRAMES: u32 = 512;
 
 // === DC Offset Removal ===
 /// Single-pole high-pass filter coefficient (~5Hz cutoff @ 48kHz)
