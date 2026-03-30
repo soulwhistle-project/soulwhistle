@@ -119,9 +119,6 @@ pub const STATUS_TIMEOUT_SECS: u64 = 3;
 /// Status message timeout (seconds) for warnings
 pub const STATUS_WARNING_TIMEOUT_SECS: u64 = 8;
 
-/// Header offset for mixer display (number of header lines)
-pub const MIXER_HEADER_OFFSET: usize = 9;
-
 // === Session Timing Defaults (Monroe-style 30-minute session) ===
 /// Default startup phase duration (minutes)
 pub const DEFAULT_STARTUP_DURATION_MIN: f32 = 2.0;

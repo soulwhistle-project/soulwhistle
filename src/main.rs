@@ -136,8 +136,6 @@ enum ChannelId {
     // Network Streaming
     StreamEnable,
     StreamPort,
-    // UI Spacer
-    Spacer,
 }
 
 impl App {
@@ -159,15 +157,12 @@ impl App {
             rf_disclaimer_shown: false,
             channels: vec![
                 ChannelInfo { name: "Master Volume".to_string(), id: ChannelId::Master },
-                ChannelInfo { name: "".to_string(), id: ChannelId::Spacer }, // Spacer
                 ChannelInfo { name: "PRESET:".to_string(), id: ChannelId::BeingType },
                 ChannelInfo { name: "PRESET_DESC".to_string(), id: ChannelId::PresetDescription },
-                ChannelInfo { name: "".to_string(), id: ChannelId::Spacer }, // Spacer
                 ChannelInfo { name: "BINAURAL BEATS".to_string(), id: ChannelId::CoherenceVol },
                 ChannelInfo { name: "  Volume".to_string(), id: ChannelId::CoherenceVol },
                 ChannelInfo { name: "  Beat Adjust".to_string(), id: ChannelId::BinauralAdjust },
                 ChannelInfo { name: "  Session Progress".to_string(), id: ChannelId::SessionTimer },
-                ChannelInfo { name: "".to_string(), id: ChannelId::Spacer }, // Spacer
                 ChannelInfo { name: "SIGNAL LAYER".to_string(), id: ChannelId::Carrier },
                 ChannelInfo { name: "  Carrier (7.83Hz)".to_string(), id: ChannelId::Carrier },
                 ChannelInfo { name: "  Harmonic (528Hz)".to_string(), id: ChannelId::Harmonic },
@@ -176,14 +171,12 @@ impl App {
                 ChannelInfo { name: "  Organic Chirps".to_string(), id: ChannelId::Chirp },
                 ChannelInfo { name: "  Ambient Pad (432Hz)".to_string(), id: ChannelId::Pad },
                 ChannelInfo { name: "  Breath Layer".to_string(), id: ChannelId::Breath },
-                ChannelInfo { name: "".to_string(), id: ChannelId::Spacer }, // Spacer
                 ChannelInfo { name: "HACKRF TRANSMIT".to_string(), id: ChannelId::RfEnable },
                 ChannelInfo { name: "  RF Enable".to_string(), id: ChannelId::RfEnable },
                 ChannelInfo { name: "  RF Frequency".to_string(), id: ChannelId::RfFreq },
                 ChannelInfo { name: "  RF Gain (VGA)".to_string(), id: ChannelId::RfGain },
                 ChannelInfo { name: "  RF Modulation Mode".to_string(), id: ChannelId::RfMode },
                 ChannelInfo { name: "  RF Pulse Waveform".to_string(), id: ChannelId::RfPulseType },
-                ChannelInfo { name: "".to_string(), id: ChannelId::Spacer }, // Spacer
                 ChannelInfo { name: "NETWORK STREAMING [EXPERIMENTAL]".to_string(), id: ChannelId::StreamEnable },
                 ChannelInfo { name: "  Stream Enable".to_string(), id: ChannelId::StreamEnable },
                 ChannelInfo { name: "  Stream Port".to_string(), id: ChannelId::StreamPort },
@@ -210,26 +203,12 @@ impl App {
     }
 
     // --- Navigation ---
-    /// Check if a visible index points to a spacer (should be skipped)
-    fn is_spacer(&self, visual_idx: usize) -> bool {
-        if visual_idx >= self.visible_channel_indices.len() {
-            return false;
-        }
-        let ch_idx = self.visible_channel_indices[visual_idx];
-        ch_idx < self.channels.len() && matches!(self.channels[ch_idx].id, ChannelId::Spacer)
-    }
-
     fn next(&mut self) {
         match self.mode {
             AppMode::Mixer => {
                 if self.visible_channel_indices.is_empty() { return; }
-                let len = self.visible_channel_indices.len();
-                let mut idx = self.state.selected().unwrap_or(0);
-                for _ in 0..len {
-                    idx = cycle_index(idx, len, 1);
-                    if !self.is_spacer(idx) { break; }
-                }
-                self.state.select(Some(idx));
+                let i = cycle_index(self.state.selected().unwrap_or(0), self.visible_channel_indices.len(), 1);
+                self.state.select(Some(i));
             },
             AppMode::PresetSelect => {
                 if self.preset_list.is_empty() { return; }
@@ -243,13 +222,8 @@ impl App {
         match self.mode {
             AppMode::Mixer => {
                 if self.visible_channel_indices.is_empty() { return; }
-                let len = self.visible_channel_indices.len();
-                let mut idx = self.state.selected().unwrap_or(0);
-                for _ in 0..len {
-                    idx = cycle_index(idx, len, -1);
-                    if !self.is_spacer(idx) { break; }
-                }
-                self.state.select(Some(idx));
+                let i = cycle_index(self.state.selected().unwrap_or(0), self.visible_channel_indices.len(), -1);
+                self.state.select(Some(i));
             },
             AppMode::PresetSelect => {
                 if self.preset_list.is_empty() { return; }
@@ -425,9 +399,6 @@ impl App {
                     params.stream_port = new_port.clamp(PORT_MIN, PORT_MAX);
                 }
 
-                ChannelId::Spacer => {
-                    // Spacer lines do nothing when arrows are pressed
-                }
             }
         }
     }
@@ -1451,8 +1422,16 @@ fn draw_preset_list(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
 }
 
 fn draw_mixer(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    // Split: fixed header (logo + ON AIR) and scrollable channel list
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(10), Constraint::Min(5)])
+        .split(area);
+    let header_area = layout[0];
+    let list_area = layout[1];
+
     // Get current params to display
-    let params = app.params.lock(); // This lock is quick, just for reading
+    let params = app.params.lock();
 
     // ON AIR retro indicator (blinks when playing)
     let blink_on = std::time::SystemTime::now()
@@ -1465,42 +1444,36 @@ fn draw_mixer(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
         Style::default().fg(Color::DarkGray).bg(Color::Black)
     };
 
-    // Add header items
-    let mut all_items = vec![
-        ListItem::new(Line::from(" ███████╗ ██████╗ ██╗   ██╗██╗     ██╗    ██╗██╗  ██╗██╗███████╗████████╗██╗     ███████╗")),
-        ListItem::new(Line::from(" ██╔════╝██╔═══██╗██║   ██║██║     ██║    ██║██║  ██║██║██╔════╝╚══██╔══╝██║     ██╔════╝")),
-        ListItem::new(Line::from(" ███████╗██║   ██║██║   ██║██║     ██║ █╗ ██║███████║██║███████╗   ██║   ██║     █████╗  ")),
-        ListItem::new(Line::from(" ╚════██║██║   ██║██║   ██║██║     ██║███╗██║██╔══██║██║╚════██║   ██║   ██║     ██╔══╝  ")),
-        ListItem::new(Line::from(" ███████║╚██████╔╝╚██████╔╝███████╗╚███╔███╔╝██║  ██║██║███████║   ██║   ███████╗███████╗")),
-        ListItem::new(Line::from(" ╚══════╝ ╚═════╝  ╚═════╝ ╚══════╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝╚══════╝   ╚═╝   ╚══════╝╚══════╝")),
-        ListItem::new(Line::from("")),
-        ListItem::new(Line::from(vec![
+    // Render fixed header as Paragraph (non-selectable, non-scrollable)
+    let header_lines = vec![
+        Line::from(" ███████╗ ██████╗ ██╗   ██╗██╗     ██╗    ██╗██╗  ██╗██╗███████╗████████╗██╗     ███████╗"),
+        Line::from(" ██╔════╝██╔═══██╗██║   ██║██║     ██║    ██║██║  ██║██║██╔════╝╚══██╔══╝██║     ██╔════╝"),
+        Line::from(" ███████╗██║   ██║██║   ██║██║     ██║ █╗ ██║███████║██║███████╗   ██║   ██║     █████╗  "),
+        Line::from(" ╚════██║██║   ██║██║   ██║██║     ██║███╗██║██╔══██║██║╚════██║   ██║   ██║     ██╔══╝  "),
+        Line::from(" ███████║╚██████╔╝╚██████╔╝███████╗╚███╔███╔╝██║  ██║██║███████║   ██║   ███████╗███████╗"),
+        Line::from(" ╚══════╝ ╚═════╝  ╚═════╝ ╚══════╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝╚══════╝   ╚═╝   ╚══════╝╚══════╝"),
+        Line::from(""),
+        Line::from(vec![
             Span::raw("         "),
             Span::styled(" ■ ON AIR ■ ", on_air_style),
             Span::raw("  Multi-Dimensional Communication System"),
-        ])),
-        ListItem::new(Line::from("         ─────────────────────────────────────────────────────────────────────────────")),
+        ]),
     ];
+    let header = Paragraph::new(header_lines)
+        .block(Block::default().borders(Borders::TOP | Borders::LEFT | Borders::RIGHT));
+    f.render_widget(header, header_area);
 
-    // Build visible channel indices mapping and items list
+    // Build visible channel indices and items (no spacers, no header offset)
     let items_with_indices: Vec<(usize, ListItem)> = app
         .channels
         .iter()
         .enumerate()
         .filter_map(|(idx, chan)| {
-            // Empty lines are spacers - always show them
-            if chan.name.is_empty() {
-                return Some((idx, ListItem::new(Line::from(""))));
-            }
-
-            // Skip collapsed section children (indented items after section headers)
-            // Look backwards to find the nearest section header
+            // Skip collapsed section children
             if chan.name.starts_with("  ") {
-                // This is a child item - find its parent section
                 for i in (0..idx).rev() {
                     let parent = &app.channels[i];
-                    if !parent.name.starts_with("  ") && !parent.name.is_empty() {
-                        // Found the parent section header
+                    if !parent.name.starts_with("  ") {
                         if parent.name == "SIGNAL LAYER" && app.signal_layer_collapsed {
                             return None;
                         }
@@ -1515,7 +1488,7 @@ fn draw_mixer(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                 }
             }
 
-            // Section headers - special handling for PRESET: and BINAURAL BEATS
+            // Section headers with special rendering
             if chan.name == "PRESET:" {
                 let preset_name = if let Some(ref title) = params.preset_title {
                     title.clone()
@@ -1529,45 +1502,42 @@ fn draw_mixer(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                         crate::coherence::BeingType::HumanCustom => "human-custom".to_string(),
                     }
                 };
-                let experimental_tag = if params.experimental == Some(true) {
-                    "[EXPERIMENTAL] "
-                } else {
-                    ""
-                };
+                let experimental_tag = if params.experimental == Some(true) { "[EXPERIMENTAL] " } else { "" };
                 let indicator = match app.preset_desc_mode {
                     PresetDescMode::Hidden => "[+]",
                     PresetDescMode::Brief => "[-]",
                     PresetDescMode::Full => "[=]",
                 };
-                return Some((idx, ListItem::new(Line::from(format!("PRESET: {}{} {}                    [s]ave [l]oad  [x] info", experimental_tag, preset_name, indicator)))));
+                let section_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+                return Some((idx, ListItem::new(Line::from(vec![
+                    Span::styled("── ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        format!("PRESET: {}{} {}", experimental_tag, preset_name, indicator),
+                        section_style,
+                    ),
+                    Span::styled("  [s]ave [l]oad [x]info", Style::default().fg(Color::DarkGray)),
+                ]))));
             }
 
             if chan.name == "PRESET_DESC" {
-                // Show description based on mode
                 match app.preset_desc_mode {
-                    PresetDescMode::Hidden => return None, // Don't show anything
+                    PresetDescMode::Hidden => return None,
                     PresetDescMode::Brief => {
-                        // Show first 3 lines with "..."
                         if let Some(ref description) = params.preset_description {
-                            let mut lines = wrap_text(description, DESC_MAX_WIDTH, Some(DESC_BRIEF_LINES), "  ");
-
+                            let mut text_lines = wrap_text(description, DESC_MAX_WIDTH, Some(DESC_BRIEF_LINES), "  ");
                             if description.len() > DESC_BRIEF_CHAR_THRESHOLD {
-                                lines.push("  ... (press [x] on PRESET line for full text)".to_string());
+                                text_lines.push("  ... (press [x] on PRESET line for full text)".to_string());
                             }
-
-                            return Some((idx, ListItem::new(lines.join("\n"))));
-                        } else {
-                            return None;
+                            return Some((idx, ListItem::new(text_lines.join("\n"))));
                         }
+                        return None;
                     },
                     PresetDescMode::Full => {
-                        // Show full description
                         if let Some(ref description) = params.preset_description {
-                            let lines = wrap_text(description, DESC_MAX_WIDTH, None, "  ");
-                            return Some((idx, ListItem::new(lines.join("\n"))));
-                        } else {
-                            return None;
+                            let text_lines = wrap_text(description, DESC_MAX_WIDTH, None, "  ");
+                            return Some((idx, ListItem::new(text_lines.join("\n"))));
                         }
+                        return None;
                     }
                 }
             }
@@ -1578,46 +1548,39 @@ fn draw_mixer(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                 } else {
                     ""
                 };
-                return Some((idx, ListItem::new(Line::from(format!("BINAURAL BEATS{}", headphones_note)))));
+                let section_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+                return Some((idx, ListItem::new(Line::from(vec![
+                    Span::styled("── ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("BINAURAL BEATS{}", headphones_note), section_style),
+                ]))));
             }
 
-            // Other section headers with collapse indicators
-            if chan.name == "SIGNAL LAYER" {
-                let indicator = if app.signal_layer_collapsed { "[+]" } else { "[-]" };
-                let item_count = 7; // carrier, harmonic, ping, ping_freq, chirp, pad, breath
-                let status = if app.signal_layer_collapsed {
+            // Collapsible section headers
+            if chan.name == "SIGNAL LAYER" || chan.name == "HACKRF TRANSMIT"
+                || chan.name.starts_with("NETWORK STREAMING")
+            {
+                let (collapsed, item_count) = match chan.name.as_str() {
+                    "SIGNAL LAYER" => (app.signal_layer_collapsed, 7),
+                    "HACKRF TRANSMIT" => (app.hackrf_collapsed, 5),
+                    _ => (app.streaming_collapsed, 2),
+                };
+                let indicator = if collapsed { "[+]" } else { "[-]" };
+                let status = if collapsed {
                     format!("{} items hidden", item_count)
                 } else {
                     "expanded".to_string()
                 };
-                return Some((idx, ListItem::new(Line::from(format!("{} {} ({})            Press [x] to toggle", chan.name, indicator, status)))));
-            }
-            if chan.name == "HACKRF TRANSMIT" {
-                let indicator = if app.hackrf_collapsed { "[+]" } else { "[-]" };
-                let item_count = 5; // enable, freq, gain, mode, pulse_type
-                let status = if app.hackrf_collapsed {
-                    format!("{} items hidden", item_count)
-                } else {
-                    "expanded".to_string()
-                };
-                return Some((idx, ListItem::new(Line::from(format!("{} {} ({})            Press [x] to toggle", chan.name, indicator, status)))));
-            }
-            if chan.name == "NETWORK STREAMING [EXPERIMENTAL]" || chan.name == "NETWORK STREAMING" {
-                let indicator = if app.streaming_collapsed { "[+]" } else { "[-]" };
-                let item_count = 2; // enable, port
-                let status = if app.streaming_collapsed {
-                    format!("{} items hidden", item_count)
-                } else {
-                    "expanded".to_string()
-                };
-                return Some((idx, ListItem::new(Line::from(format!("{} {} ({})            Press [x] to toggle", chan.name, indicator, status)))));
+                let section_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+                return Some((idx, ListItem::new(Line::from(vec![
+                    Span::styled("── ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{} {}", chan.name, indicator), section_style),
+                    Span::styled(format!(" ({})  [x]toggle", status), Style::default().fg(Color::DarkGray)),
+                ]))));
             }
 
+            // Regular channel items
             let content = match chan.id {
-                ChannelId::BeingType => {
-                    // This is now handled in the header section above
-                    String::new()
-                },
+                ChannelId::BeingType => String::new(),
                 ChannelId::CoherenceVol => {
                     if matches!(params.coherence.being_type, crate::coherence::BeingType::Unknown) {
                         format!("{:<40} [Disabled - select a preset]", chan.name)
@@ -1627,12 +1590,12 @@ fn draw_mixer(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                         let empty: String = std::iter::repeat("░").take(20 - filled).collect();
                         let beat_hz = params.coherence.binaural_beat_hz();
                         let state = params.coherence.brainwave_state();
-                        format!("{:<40} [{}{}] {:.0}% {:.1}Hz {}", 
+                        format!("{:<40} [{}{}] {:.0}% {:.1}Hz {}",
                             chan.name, bar, empty, params.coherence.volume * 100.0, beat_hz, state)
                     }
                 },
                 ChannelId::PingFreq => {
-                    format!("{:<40} {:.2}kHz (arrows to adjust)", 
+                    format!("{:<40} {:.2}kHz (arrows to adjust)",
                         chan.name, params.ping_freq_hz / 1000.0)
                 },
                 ChannelId::BinauralAdjust => {
@@ -1666,11 +1629,7 @@ fn draw_mixer(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                 ChannelId::RfEnable => {
                     let detection = if params.rf_detected { "✓" } else { "✗" };
                     let state = if params.rf_enabled { "ON " } else { "OFF" };
-                    let warning = if params.rf_enabled && !params.rf_detected {
-                        " NO DEVICE!"
-                    } else {
-                        ""
-                    };
+                    let warning = if params.rf_enabled && !params.rf_detected { " NO DEVICE!" } else { "" };
                     format!("{:<40} {} {} {}", chan.name, state, detection, warning)
                 },
                 ChannelId::RfFreq => {
@@ -1697,7 +1656,7 @@ fn draw_mixer(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                     format!("{:<40} {} {}{}", chan.name, state, detection, clients_info)
                 },
                 ChannelId::StreamPort => {
-                    format!("{:<40} {} (http://<ip>:{}/stream.wav)", 
+                    format!("{:<40} {} (http://<ip>:{}/stream.wav)",
                         chan.name, params.stream_port, params.stream_port)
                 },
                 _ => {
@@ -1711,21 +1670,13 @@ fn draw_mixer(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                         ChannelId::Breath => (params.breath_vol, Some(params.breath_type)),
                         _ => (0.0, None),
                     };
-                    
-                    let is_signal_channel = matches!(chan.id, 
-                        ChannelId::Carrier | ChannelId::Harmonic | ChannelId::Ping | 
+                    let is_signal_channel = matches!(chan.id,
+                        ChannelId::Carrier | ChannelId::Harmonic | ChannelId::Ping |
                         ChannelId::Chirp | ChannelId::Pad | ChannelId::Breath);
-                    
                     let filled = (vol * 20.0) as usize;
                     let bar: String = std::iter::repeat("█").take(filled).collect();
                     let empty: String = std::iter::repeat("░").take(20 - filled).collect();
-                    
-                    let suffix = if is_signal_channel && params.lock_signal_layer {
-                        " [LOCKED]"
-                    } else {
-                        ""
-                    };
-                    
+                    let suffix = if is_signal_channel && params.lock_signal_layer { " [LOCKED]" } else { "" };
                     if let Some(mt) = mod_type {
                         format!("{:<40} [{}{}] {:.0}% {:?}{}", chan.name, bar, empty, vol * 100.0, mt, suffix)
                     } else {
@@ -1740,23 +1691,15 @@ fn draw_mixer(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     // Split into indices and items
     let (visible_indices, items): (Vec<usize>, Vec<ListItem>) = items_with_indices.into_iter().unzip();
 
-    // Store the mapping in app for toggle_collapse to use
-    drop(params); // Release lock before modifying app
+    // Store the mapping in app
+    drop(params);
     app.visible_channel_indices = visible_indices;
 
-    // Combine header and channel items
-    all_items.extend(items);
-
-    let list = List::new(all_items)
-        .block(Block::default().borders(Borders::ALL))
+    // Render channel list directly — no header offset needed
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::BOTTOM | Borders::LEFT | Borders::RIGHT))
         .highlight_style(Style::default().add_modifier(Modifier::BOLD).fg(Color::Yellow))
         .highlight_symbol(">> ");
 
-    // Offset the state to account for header items
-    let mut adjusted_state = app.state.clone();
-    if let Some(selected) = app.state.selected() {
-        adjusted_state.select(Some(selected + MIXER_HEADER_OFFSET));
-    }
-
-    f.render_stateful_widget(list, area, &mut adjusted_state);
+    f.render_stateful_widget(list, list_area, &mut app.state);
 }
