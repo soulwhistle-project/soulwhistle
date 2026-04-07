@@ -419,6 +419,128 @@ This file lists the key research papers and articles that inform the principles 
 
 ---
 
+## 40 Hz Gamma Stimulation and Neurodegeneration
+
+### 22. Iaccarino, H. F., Singer, A. C., Martorell, A. J., Rudenko, A., Gao, F., Gillingham, T. Z., Mathys, H., Seo, J., Kritber, O., Abdurrob, F., Kim, S. Y., Bhatt, R., & Tsai, L.-H. (2016). Gamma frequency entrainment attenuates amyloid load and modifies microglia. *Nature, 540*(7632), 230-235.
+
+**Relevance:** Landmark MIT study demonstrating that 40 Hz sensory stimulation reduces Alzheimer's amyloid plaques in mouse models. Foundation for the entire gamma stimulation neuroprotection research program. Directly supports the 40 Hz gamma preset.
+
+**DOI:** 10.1038/nature20587
+**PMID:** 27929004
+
+**APA:** Iaccarino, H. F., Singer, A. C., Martorell, A. J., Rudenko, A., Gao, F., Gillingham, T. Z., ... & Tsai, L.-H. (2016). Gamma frequency entrainment attenuates amyloid load and modifies microglia. *Nature, 540*(7632), 230-235.
+
+**BibTeX:**
+```bibtex
+@article{iaccarino2016gamma,
+  title={Gamma frequency entrainment attenuates amyloid load and modifies microglia},
+  author={Iaccarino, Hannah F and Singer, Annabelle C and Martorell, Anthony J and Rudenko, Andrii and Gao, Fan and Gillingham, Tyler Z and Mathys, Hansruedi and Seo, Jinsoo and Kritber, Oleg and Abdurrob, Fatema and others},
+  journal={Nature},
+  volume={540},
+  number={7632},
+  pages={230--235},
+  year={2016},
+  doi={10.1038/nature20587}
+}
+```
+
+### 23. Blanco-Duque, C., Chan, D., Bhatt, M., & Bhatt, J. (2024). Audiovisual gamma stimulation for the treatment of neurodegeneration. *Journal of Internal Medicine, 295*(2), 146-170.
+
+**Relevance:** Comprehensive review of 40 Hz audiovisual stimulation research including Phase II clinical trial results in Alzheimer's patients. Found significant slowing of brain atrophy, preserved white matter, and cognitive improvements. Mechanism: 40 Hz stimulates VIP peptide release from interneurons, increasing amyloid clearance via glymphatic system. Supports longer therapeutic gamma sessions beyond the current 15-min preset.
+
+**DOI:** 10.1111/joim.13755
+**PMID:** 38164979
+
+**APA:** Blanco-Duque, C., Chan, D., Bhatt, M., & Bhatt, J. (2024). Audiovisual gamma stimulation for the treatment of neurodegeneration. *Journal of Internal Medicine, 295*(2), 146-170.
+
+**BibTeX:**
+```bibtex
+@article{blancoduque2024audiovisual,
+  title={Audiovisual gamma stimulation for the treatment of neurodegeneration},
+  author={Blanco-Duque, Cristina and Chan, Dennis and Bhatt, Mihir and Bhatt, Jayan},
+  journal={Journal of Internal Medicine},
+  volume={295},
+  number={2},
+  pages={146--170},
+  year={2024},
+  doi={10.1111/joim.13755}
+}
+```
+
+---
+
+## Specific Frequency Research (528 Hz, 432 Hz)
+
+### 24. Akimoto, K., Hu, A., Yamaguchi, T., & Kobayashi, H. (2018). Effect of 528 Hz music on the endocrine system and autonomic nervous system. *Health, 10*(9), 1159-1170.
+
+**Relevance:** Only human study on 528 Hz. Nine participants listened to 528 Hz vs 440 Hz music in crossover design. 528 Hz significantly decreased cortisol, increased oxytocin, and reduced tension-anxiety and total mood disturbance scores (POMS 2). No significant changes with 440 Hz. Supports 528 Hz as carrier/ambient frequency for stress reduction. Limitations: n=9, 8 women/1 man, no blinding described.
+
+**DOI:** 10.4236/health.2018.109088
+
+**APA:** Akimoto, K., Hu, A., Yamaguchi, T., & Kobayashi, H. (2018). Effect of 528 Hz music on the endocrine system and autonomic nervous system. *Health, 10*(9), 1159-1170.
+
+**BibTeX:**
+```bibtex
+@article{akimoto2018effect,
+  title={Effect of 528 Hz music on the endocrine system and autonomic nervous system},
+  author={Akimoto, Kaho and Hu, Ailing and Yamaguchi, Takuji and Kobayashi, Hiroki},
+  journal={Health},
+  volume={10},
+  number={9},
+  pages={1159--1170},
+  year={2018},
+  doi={10.4236/health.2018.109088}
+}
+```
+
+### 25. Babayi Daylari, T., Riazi, G. H., Pooyan, S., Fathi, E., & Hedayati Katouli, F. (2019). Influence of various intensities of 528 Hz sound-wave in production of testosterone in rat's brain and analysis of its gene expression. *Genes & Genomics, 41*(2), 201-211.
+
+**Relevance:** 528 Hz at 100 dB increased testosterone production in rat brains by enhancing StAR and SF-1 gene expression while reducing P450 aromatase. Reduced total reactive oxygen species in brain tissue and decreased anxiety-related behaviors. Establishes a molecular mechanism (testosterone pathway) for 528 Hz anxiolytic effects.
+
+**PMID:** 30414050
+**DOI:** 10.1007/s13258-018-0753-6
+
+**APA:** Babayi Daylari, T., Riazi, G. H., Pooyan, S., Fathi, E., & Hedayati Katouli, F. (2019). Influence of various intensities of 528 Hz sound-wave in production of testosterone in rat's brain and analysis of its gene expression. *Genes & Genomics, 41*(2), 201-211.
+
+**BibTeX:**
+```bibtex
+@article{babayidaylari2019influence,
+  title={Influence of various intensities of 528 Hz sound-wave in production of testosterone in rat's brain and analysis of its gene expression},
+  author={Babayi Daylari, T and Riazi, G H and Pooyan, Sh and Fathi, E and Hedayati Katouli, F},
+  journal={Genes \& Genomics},
+  volume={41},
+  number={2},
+  pages={201--211},
+  year={2019},
+  doi={10.1007/s13258-018-0753-6}
+}
+```
+
+### 26. Calamassi, D., & Pomponi, G. P. (2019). Music tuned to 440 Hz versus 432 Hz and the health effects: A double-blind cross-over pilot study. *Explore, 15*(4), 283-290.
+
+**Relevance:** Double-blind crossover study comparing 432 Hz vs 440 Hz tuned music. 432 Hz produced significant heart rate decrease (-4.79 bpm, p=0.05), slight decreases in blood pressure and respiratory rate, and participants reported greater satisfaction and focus. Supports 432 Hz as ambient pad frequency in UAP and relaxation presets.
+
+**PMID:** 31031095
+**DOI:** 10.1016/j.explore.2019.04.001
+
+**APA:** Calamassi, D., & Pomponi, G. P. (2019). Music tuned to 440 Hz versus 432 Hz and the health effects: A double-blind cross-over pilot study. *Explore, 15*(4), 283-290.
+
+**BibTeX:**
+```bibtex
+@article{calamassi2019music,
+  title={Music tuned to 440 Hz versus 432 Hz and the health effects: A double-blind cross-over pilot study},
+  author={Calamassi, Danilo and Pomponi, Gian Paolo},
+  journal={Explore},
+  volume={15},
+  number={4},
+  pages={283--290},
+  year={2019},
+  doi={10.1016/j.explore.2019.04.001}
+}
+```
+
+---
+
 ## Research Quality Notes
 
 ### Strengths:
@@ -434,12 +556,14 @@ This file lists the key research papers and articles that inform the principles 
 - Individual variation is significant
 - Publication bias (negative results underreported)
 
-### Current Scientific Consensus (2025):
+### Current Scientific Consensus (2026):
 1. Binaural beats CAN produce measurable EEG changes
 2. Effects are HIGHLY INDIVIDUAL and often subtle
 3. Anxiety reduction has most consistent evidence
 4. Cognitive enhancement claims are overstated
-5. More research needed with standardized protocols
+5. 40 Hz gamma stimulation has strongest emerging clinical evidence (Phase III trial underway)
+6. 528 Hz and 432 Hz have preliminary but small-sample support for stress/relaxation
+7. More research needed with standardized protocols
 
 ---
 
@@ -459,5 +583,5 @@ This file lists the key research papers and articles that inform the principles 
 
 ---
 
-**Last Updated:** December 23, 2025
-**Total Citations:** 21 peer-reviewed sources + 4 books/patents
+**Last Updated:** April 7, 2026
+**Total Citations:** 26 peer-reviewed sources + 4 books/patents

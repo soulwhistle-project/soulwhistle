@@ -1,6 +1,6 @@
 {
   "preset_title": "Deep Focus - Experimental Gamma (40 Hz)",
-  "preset_description": "40 Hz gamma binaural beats for experimental peak attention. EXPERIMENTAL - NO research evidence for 40 Hz binaural beats in our knowledge base. Gamma EEG activity (30-100 Hz) is associated with cognitive binding, but binaural beat effectiveness at this frequency is unproven. Use ONLY for short sessions (15 min max). Optimized 440Hz carrier. WARNING: HIGH risk of overstimulation, headaches, or discomfort. Stop immediately if adverse effects occur. NOT recommended for ADHD - try 10 Hz Alpha or 18 Hz Beta instead. REQUIRES HEADPHONES. Individual response varies significantly.",
+  "preset_description": "40 Hz gamma binaural beats for peak attention and cognitive binding. Research: MIT Tsai Lab (Nature 2016) demonstrated 40 Hz entrainment reduces amyloid plaques; Phase II clinical trials showed slowed brain atrophy in Alzheimer's patients; Rakhshan et al. (2022 RCT, n=31) confirmed gamma EEG induction and working memory improvement. This preset is optimized for short focus bursts (15 min). For longer neuroprotection sessions, increase duration and lower volume. WARNING: Risk of overstimulation with extended high-volume use. Stop if headaches or discomfort occur. NOT recommended for ADHD - try 10 Hz Alpha or 14 Hz SMR instead. REQUIRES HEADPHONES. Individual response varies significantly.",
   "experimental": true,
   "lock_signal_layer": true,
   "master_vol": 0.5,

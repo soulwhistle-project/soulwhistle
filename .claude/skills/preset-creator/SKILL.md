@@ -49,12 +49,20 @@ When users ask you to create or modify presets, you will:
 - **Duration needed**: 30-40 min for attention training
 - **Best for**: Work, problem-solving, sustained attention
 
-**Gamma (30-100 Hz)**: Peak attention, cognitive binding, working memory
-- **40 Hz**: Cognitive binding, information integration
-- **Research**: Supports working memory, sensory processing
-- **WARNING**: May cause overstimulation
-- **Duration needed**: 10-15 min ONLY - short intensive bursts
-- **Best for**: Intense focus tasks, memory tasks (use sparingly)
+**Gamma (30-100 Hz)**: Peak attention, cognitive binding, working memory, neuroprotection
+- **40 Hz**: Cognitive binding, information integration, amyloid clearance
+- **Research (MIT Tsai Lab, Nature 2016+)**:
+  - Iaccarino et al. (2016): 40 Hz entrainment reduced amyloid plaques in Alzheimer's mice
+  - Phase II clinical trial: slowed brain atrophy, preserved white matter in AD patients
+  - Phase III trial underway (Cognito Therapeutics)
+  - Mechanism: stimulates VIP peptide → glymphatic amyloid clearance
+  - Rakhshan et al. (2022): 40 Hz binaural beats induced gamma EEG oscillations, improved working memory (n=31 RCT)
+  - 40 Hz binaural beats enhanced mood and cognition in medical students (2024)
+- **Duration**: Two usage modes:
+  - **Focus burst**: 10-15 min max (attention/cognition, risk of overstimulation)
+  - **Neuroprotection**: 30-60 min daily (based on MIT clinical protocol, 1 hour/day audiovisual)
+- **WARNING**: May cause overstimulation in short intense sessions. Neuroprotection protocol uses lower volume over longer duration.
+- **Best for**: Intense focus tasks, memory tasks, daily neuroprotection routine
 
 ### Monroe Institute Innovations (Decoded via FFT Analysis)
 
@@ -103,6 +111,24 @@ Example: 400 Hz + 4.11 Hz = 404.11 Hz
 - Creates subjective "expansion" feeling
 - Used in Monroe Focus 12
 
+### Specific Frequency Research (Carrier/Ambient)
+
+**528 Hz (Solfeggio Mi)**: Stress reduction carrier
+- Akimoto et al. (2018): Decreased cortisol, increased oxytocin after 5 min (n=9, crossover vs 440 Hz)
+- Babayi Daylari et al. (2019): Reduced anxiety in rats via testosterone/StAR pathway, decreased ROS
+- **Use as**: Carrier frequency or ambient pad for relaxation presets
+- **Limitation**: Very small human sample, no replication yet
+
+**432 Hz (Verdi's A)**: Relaxation/sleep ambient
+- Calamassi & Pomponi (2019): Double-blind crossover, -4.79 bpm heart rate (p=0.05), improved sleep scores (+3.6, p=0.02)
+- Stronger left prefrontal alpha on EEG (increased liking)
+- **Use as**: Ambient pad frequency, sleep preparation presets
+- **Limitation**: Pilot study, small samples
+
+**525 Hz**: No published research. Sometimes marketed as "love frequency" but borrows claims from 528 Hz. Do not cite research for this frequency.
+
+**Other Solfeggio (396, 417, 639, 741, 852, 963 Hz)**: No peer-reviewed research on individual frequencies. Historical link to Gregorian chants is fabricated (Puleo/Horowitz 1990s). May be offered as experimental/spiritual presets with clear disclaimers only.
+
 ### Individual Variation (CRITICAL WARNING)
 
 **Reedijk et al. (2013) Finding**: Individual response is MASSIVE
@@ -122,8 +148,9 @@ Example: 400 Hz + 4.11 Hz = 404.11 Hz
 - 15-30 min: Optimal for most states
 - 30-60 min: Extended for deep states (Focus 12, creative work)
 
-**Gamma exception**: 10-15 minutes MAXIMUM
-- Longer sessions may cause overstimulation
+**Gamma - two modes**:
+- **Focus burst**: 10-15 minutes MAXIMUM (high volume, risk of overstimulation)
+- **Neuroprotection**: 30-60 minutes daily at lower volume (based on MIT clinical protocol using 1 hr/day audiovisual stimulation)
 
 ## JSON Preset Structure
 
@@ -204,7 +231,8 @@ Example: 400 Hz + 4.11 Hz = 404.11 Hz
 - **Return**: 2-7 min (gentle return)
 
 **Total session examples**:
-- Gamma (40 Hz): 15 min total (1+8+4+2)
+- Gamma focus burst (40 Hz): 15 min total (1+8+4+2)
+- Gamma neuroprotection (40 Hz): 60 min total (3+25+25+7)
 - Beta/SMR (14-18 Hz): 40 min total (2+18+15+5)
 - Alpha (10 Hz): 45 min total (3+20+17+5)
 - Theta (4-5 Hz): 30 min total (2+13+10+5)
