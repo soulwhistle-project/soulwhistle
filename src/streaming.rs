@@ -1,36 +1,51 @@
 use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
+use crate::audio::AudioParams;
 use crate::constants::*;
+
+/// Internal ring state guarded by a single lock.
+/// `write_count` is a monotonic count of all samples ever pushed, so a reader can
+/// hold an absolute read index that survives `pop_front()` rotation of the deque.
+struct RingState {
+    samples: VecDeque<(f32, f32)>,
+    write_count: u64,
+}
 
 /// Circular buffer for stereo audio samples
 pub struct AudioRingBuffer {
-    buffer: Mutex<VecDeque<(f32, f32)>>,
+    state: Mutex<RingState>,
     capacity: usize,
     sample_rate: u32,
-    stream_epoch: Mutex<u32>, // Incremented when preset changes to force client reconnects
+    stream_epoch: AtomicU32, // Incremented when preset changes to force client reconnects
 }
 
 impl AudioRingBuffer {
     pub fn new(sample_rate: u32, buffer_ms: u32) -> Self {
         let capacity = (sample_rate * buffer_ms / 1000) as usize;
         Self {
-            buffer: Mutex::new(VecDeque::with_capacity(capacity)),
+            state: Mutex::new(RingState {
+                samples: VecDeque::with_capacity(capacity),
+                write_count: 0,
+            }),
             capacity,
             sample_rate,
-            stream_epoch: Mutex::new(0),
+            stream_epoch: AtomicU32::new(0),
         }
     }
 
     /// Push multiple stereo samples into the ring buffer (batch operation)
     /// Single lock acquisition for entire batch - critical for realtime audio
     pub fn push_samples_batch(&self, samples: &[(f32, f32)]) {
-        let mut buf = self.buffer.lock();
+        let mut st = self.state.lock();
         for &(left, right) in samples {
-            if buf.len() >= self.capacity {
-                buf.pop_front(); // Remove oldest sample
+            if st.samples.len() >= self.capacity {
+                st.samples.pop_front(); // Remove oldest sample
             }
-            buf.push_back((left, right));
+            st.samples.push_back((left, right));
+            st.write_count += 1;
         }
     }
 
@@ -41,38 +56,48 @@ impl AudioRingBuffer {
 
     /// Flush the buffer (clear all samples) and increment epoch to force client reconnects
     pub fn flush(&self) {
-        let mut buf = self.buffer.lock();
-        buf.clear();
-        drop(buf);
+        {
+            let mut st = self.state.lock();
+            st.samples.clear();
+            // Keep write_count monotonic so readers don't see the index jump backwards.
+        }
 
         // Increment epoch to signal preset change to active streaming clients
-        let mut epoch = self.stream_epoch.lock();
-        *epoch = epoch.wrapping_add(1);
+        self.stream_epoch.fetch_add(1, Ordering::Release);
     }
 
     /// Get current stream epoch (for detecting preset changes in streaming clients)
     pub fn get_epoch(&self) -> u32 {
-        *self.stream_epoch.lock()
+        self.stream_epoch.load(Ordering::Acquire)
     }
 
-    /// Read samples from a specific position
-    pub fn read_samples(&self, position: &mut usize, count: usize) -> Vec<(f32, f32)> {
-        let buf = self.buffer.lock();
-        let available = buf.len();
-        
-        if available == 0 {
+    /// Read up to `count` new samples starting at the reader's absolute `position`.
+    ///
+    /// `position` is an absolute sample index into the lifetime stream (not a deque
+    /// index), so it stays correct as the producer rotates the deque via `pop_front`.
+    /// If the reader has fallen further behind than the buffer holds, it is
+    /// fast-forwarded to the oldest available sample (dropping the gap) to stay live.
+    pub fn read_samples(&self, position: &mut u64, count: usize) -> Vec<(f32, f32)> {
+        let st = self.state.lock();
+        let len = st.samples.len() as u64;
+        let write_count = st.write_count;
+        let oldest = write_count - len; // absolute index of samples.front()
+
+        // Reader fell behind the retained window: skip the gap, resume at oldest.
+        if *position < oldest {
+            *position = oldest;
+        }
+
+        // Nothing new available yet.
+        if *position >= write_count {
             return Vec::new();
         }
 
-        // If position is too far behind, reset to start
-        if *position >= available {
-            *position = 0;
-        }
+        let start = (*position - oldest) as usize;
+        let end = (start + count).min(st.samples.len());
+        let samples: Vec<(f32, f32)> = st.samples.range(start..end).copied().collect();
+        *position += (end - start) as u64;
 
-        let end = (*position + count).min(available);
-        let samples: Vec<(f32, f32)> = buf.range(*position..end).copied().collect();
-        *position = end;
-        
         samples
     }
 }
@@ -82,18 +107,27 @@ pub struct StreamingServer {
     buffer: Arc<AudioRingBuffer>,
     port: u16,
     pub client_count: Arc<Mutex<usize>>,
+    params: Arc<Mutex<AudioParams>>,
 }
 
 impl StreamingServer {
-    pub fn new(buffer: Arc<AudioRingBuffer>, port: u16, client_count: Arc<Mutex<usize>>) -> Self {
+    pub fn new(
+        buffer: Arc<AudioRingBuffer>,
+        port: u16,
+        client_count: Arc<Mutex<usize>>,
+        params: Arc<Mutex<AudioParams>>,
+    ) -> Self {
         Self {
             buffer,
             port,
             client_count,
+            params,
         }
     }
 
-    /// Start the HTTP server (blocking call - run in separate thread)
+    /// Start the HTTP server (blocking call - run in separate thread).
+    /// Returns when streaming is disabled or the port changes, so the bound
+    /// socket is dropped and the supervisor can rebind cleanly.
     pub fn run(self) {
         let server = match tiny_http::Server::http(format!("0.0.0.0:{}", self.port)) {
             Ok(s) => s,
@@ -103,18 +137,33 @@ impl StreamingServer {
             }
         };
 
-        // Server started successfully - silently run
-        for request in server.incoming_requests() {
+        loop {
+            // Poll with a timeout so we can periodically check whether to shut down.
+            let request = match server.recv_timeout(Duration::from_millis(STREAM_ACCEPT_TIMEOUT_MS)) {
+                Ok(Some(req)) => req,
+                Ok(None) => {
+                    // Timed out with no request: re-check shutdown condition.
+                    if self.should_stop() {
+                        return; // Drops `server`, freeing the port for rebind.
+                    }
+                    continue;
+                }
+                Err(e) => {
+                    eprintln!("Streaming server recv error: {}", e);
+                    return;
+                }
+            };
+
             let path = request.url().to_string();
-            
+
             // Accept /stream.wav or just /
             let is_valid_path = path == "/stream.wav" || path == "/";
-            
+
             if is_valid_path {
                 // Clone necessary data for the thread
                 let buffer = self.buffer.clone();
                 let client_count = self.client_count.clone();
-                
+
                 // Increment client count
                 {
                     let mut count = client_count.lock();
@@ -126,7 +175,7 @@ impl StreamingServer {
                     if let Err(e) = handle_stream_request(request, buffer.clone()) {
                         eprintln!("Stream error: {}", e);
                     }
-                    
+
                     // Decrement client count when done
                     let mut count = client_count.lock();
                     *count = count.saturating_sub(1);
@@ -137,7 +186,17 @@ impl StreamingServer {
                     .with_status_code(404);
                 let _ = request.respond(response);
             }
+
+            if self.should_stop() {
+                return;
+            }
         }
+    }
+
+    /// True when streaming has been disabled or retargeted to a different port.
+    fn should_stop(&self) -> bool {
+        let p = self.params.lock();
+        !p.stream_enabled || p.stream_port != self.port
     }
 }
 
@@ -175,7 +234,7 @@ fn handle_stream_request(
 /// Custom reader that streams audio data
 struct AudioStreamReader {
     buffer: Arc<AudioRingBuffer>,
-    position: usize,
+    position: u64,
     header: Option<Vec<u8>>,
     pcm_buffer: Vec<u8>, // Reusable buffer for PCM conversion
     initial_epoch: u32,  // Epoch when connection started (to detect preset changes)
@@ -195,12 +254,6 @@ impl AudioStreamReader {
 
 impl std::io::Read for AudioStreamReader {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        // Check if epoch changed (preset changed) - close connection to force client reconnect
-        if self.buffer.get_epoch() != self.initial_epoch {
-            // Return 0 to signal end-of-stream, causing client to reconnect
-            return Ok(0);
-        }
-
         // First, send the header if we have one
         if let Some(header) = self.header.take() {
             let len = header.len().min(buf.len());
@@ -214,14 +267,31 @@ impl std::io::Read for AudioStreamReader {
             return Ok(len);
         }
 
-        // Read samples from buffer
-        let samples = self.buffer.read_samples(&mut self.position, STREAM_READ_CHUNK_SIZE);
-
-        if samples.is_empty() {
-            // No data yet, wait a bit then try again
-            std::thread::sleep(std::time::Duration::from_millis(STREAM_READ_WAIT_MS));
+        // Only read as many samples as fit in `buf` (4 bytes per stereo frame), so the
+        // whole PCM batch is always flushed — never truncated and lost.
+        let max_samples = (buf.len() / 4).min(STREAM_READ_CHUNK_SIZE);
+        if max_samples == 0 {
+            // Caller-provided buffer can't hold a full stereo frame; signal EOF.
             return Ok(0);
         }
+
+        // Block until data is available, retrying on transient underrun. Returning
+        // Ok(0) here would be interpreted as end-of-stream and close the connection,
+        // so it is reserved exclusively for the preset-change reconnect below.
+        let samples = loop {
+            // Epoch changed (preset changed): close connection to force client reconnect.
+            if self.buffer.get_epoch() != self.initial_epoch {
+                return Ok(0);
+            }
+
+            let samples = self.buffer.read_samples(&mut self.position, max_samples);
+            if !samples.is_empty() {
+                break samples;
+            }
+
+            // No data yet (buffer underrun) — wait briefly, then retry.
+            std::thread::sleep(Duration::from_millis(STREAM_READ_WAIT_MS));
+        };
 
         // Reuse the PCM buffer (clear but keep capacity)
         self.pcm_buffer.clear();
@@ -235,7 +305,7 @@ impl std::io::Read for AudioStreamReader {
             self.pcm_buffer.extend_from_slice(&right_i16.to_le_bytes());
         }
 
-        // Copy to output buffer
+        // PCM batch is sized to fit `buf` by construction, so this copies all of it.
         let len = self.pcm_buffer.len().min(buf.len());
         buf[..len].copy_from_slice(&self.pcm_buffer[..len]);
 

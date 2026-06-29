@@ -325,8 +325,10 @@ impl Synthesizer {
         components.carrier = match params.carrier_type {
             SignalType::SchumannAM => fast_sin(self.phase_100hz) * (AM_MODULATION_MIN + AM_MODULATION_MIN * fast_sin(self.phase_7_83hz)),
             SignalType::SchumannFM => {
-                let _mod_freq = CARRIER_BASE_HZ + FM_MODULATION_RANGE_HZ * fast_sin(self.phase_7_83hz);
-                fast_sin(self.phase_100hz)
+                // True frequency modulation via phase modulation (spectrally equivalent):
+                // sin(carrier_phase + beta * sin(mod_phase)), beta = deviation / mod_freq.
+                let beta = FM_MODULATION_RANGE_HZ / SCHUMANN_RESONANCE_HZ;
+                fast_sin(self.phase_100hz + beta * fast_sin(self.phase_7_83hz))
             },
             SignalType::Schumann783AM => fast_sin(self.phase_783hz) * (AM_MODULATION_MIN + AM_MODULATION_MIN * fast_sin(self.phase_7_83hz)),
             SignalType::Sine100Hz => fast_sin(self.phase_100hz),
@@ -339,8 +341,16 @@ impl Synthesizer {
         components.harmonic = generate_waveform(self.phase_528hz, params.harmonic_type);
 
         // 3. Ultrasonic Ping
+        // Nyquist guard: a ping above the Nyquist limit can't be reproduced and would
+        // alias down to an audible tone (e.g. 40 kHz @ 48 kHz -> 8 kHz). Mute it instead
+        // of emitting a false frequency. Margin keeps it clear of the fold point.
         self.phase_17khz = (self.phase_17khz + params.ping_freq_hz * dt * pi2) % pi2;
-        components.ping = generate_waveform(self.phase_17khz, params.ping_type);
+        let nyquist_limit = self.sample_rate * NYQUIST_SAFE_FRACTION;
+        components.ping = if params.ping_freq_hz > nyquist_limit {
+            0.0
+        } else {
+            generate_waveform(self.phase_17khz, params.ping_type)
+        };
 
         // 4. Chirps
         self.chirp_timer += dt;
@@ -412,11 +422,15 @@ impl Synthesizer {
         let dt = 1.0 / self.sample_rate;
         let components = self.generate_signal_components(params, dt);
 
+        // Advance the session timer every sample so phase-based volume ramping and
+        // gamma bursts progress on the RF path too (audio path does this in next_sample).
+        self.coherence.update_timer(&params.coherence);
+
         // For RF, we use a TRUE 7.83Hz envelope, not the AM trick for audio.
-        let pi2 = 2.0 * std::f32::consts::PI;
-        self.phase_7_83hz = (self.phase_7_83hz + SCHUMANN_RESONANCE_HZ * dt * pi2) % pi2;
+        // phase_7_83hz was already advanced inside generate_signal_components — reuse it
+        // (advancing again here would double the envelope frequency to 15.66 Hz).
         let schumann_envelope = AM_MODULATION_MIN + AM_MODULATION_MIN * fast_sin(self.phase_7_83hz);
-        
+
         let carrier_signal = schumann_envelope;
 
         // Mix all RF components

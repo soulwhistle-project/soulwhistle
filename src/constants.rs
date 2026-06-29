@@ -45,8 +45,9 @@ pub const GAMMA_BURST_DURATION_SECS: f32 = 3.0;
 /// Gamma burst carrier frequency
 pub const GAMMA_CARRIER_HZ: f32 = 300.0;
 
-/// Gamma burst binaural beat (393 Hz)
-pub const GAMMA_BEAT_HZ: f32 = 393.0;
+/// Gamma burst binaural beat (40 Hz) — gamma entrainment per Iaccarino et al. 2016.
+/// The brain follows binaural beats only up to ~40 Hz, so this must stay in range.
+pub const GAMMA_BEAT_HZ: f32 = 40.0;
 
 // === Sample Rates ===
 /// RF transmission sample rate (2 MHz for HackRF)
@@ -83,6 +84,10 @@ pub const PING_FREQ_FINE_STEP: f32 = 100.0;
 /// Ping frequency range (Hz)
 pub const PING_FREQ_MIN_HZ: f32 = 1000.0;
 pub const PING_FREQ_MAX_HZ: f32 = 100000.0;
+
+/// Fraction of sample rate above which a tone is muted to avoid Nyquist aliasing
+/// (0.45 * fs leaves margin below the fold point at fs/2)
+pub const NYQUIST_SAFE_FRACTION: f32 = 0.45;
 
 /// RF frequency adjustment step (100 kHz)
 pub const RF_FREQ_STEP_HZ: u64 = 100_000;
@@ -189,6 +194,10 @@ pub const STREAM_READ_CHUNK_SIZE: usize = 1024;
 
 /// Streaming read wait time when buffer empty (ms)
 pub const STREAM_READ_WAIT_MS: u64 = 5;
+
+/// Streaming server accept poll timeout (ms) — bounds shutdown latency when
+/// streaming is toggled off or the port changes
+pub const STREAM_ACCEPT_TIMEOUT_MS: u64 = 500;
 
 /// WAV file format constants
 pub const WAV_INFINITE_SIZE: u32 = 0xFFFFFFFF;

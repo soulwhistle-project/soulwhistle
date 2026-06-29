@@ -1003,11 +1003,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             if enabled {
                 *stream_client_count_for_server.lock() = 0; // Reset count
                 let server = StreamingServer::new(
-                    stream_buffer_for_server.clone(), 
+                    stream_buffer_for_server.clone(),
                     port,
-                    stream_client_count_for_server.clone()
+                    stream_client_count_for_server.clone(),
+                    stream_params.clone(),
                 );
-                server.run(); // Blocking call - only returns if server fails or stream disabled
+                server.run(); // Returns when streaming is disabled or the port changes
             }
             
             // If not enabled or server stopped, wait and check again
