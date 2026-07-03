@@ -1,6 +1,6 @@
 [package]
 name = "soulwhistle"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 authors = ["Soulwhistle Project"]
 description = "Open-source platform for consciousness research using binaural beats, brainwave entrainment, and audio synthesis"
