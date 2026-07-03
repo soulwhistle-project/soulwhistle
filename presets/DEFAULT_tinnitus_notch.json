@@ -1,0 +1,9 @@
+{
+  "preset_title": "Tinnitus Notch Therapy (Notched Noise)",
+  "preset_description": "Tailor-made notched sound therapy: broadband pink noise with a band of energy removed around your tinnitus pitch. Neurons at the notch edges fire normally and laterally inhibit the over-active tinnitus-frequency neurons, reducing perceived loudness over weeks of daily listening. Based on Okamoto et al. (2010, PNAS), which found notched music lowered tinnitus loudness and auditory-cortex activity; notch width set to 0.5 octave following Stein et al. (2016), who showed narrower notches give stronger lateral inhibition than the original 1-octave width. IMPORTANT: the 6000 Hz center here is only an EXAMPLE - you MUST adapt it to your own tinnitus pitch. Press [t] to play a matching tone, tune it until it matches your tinnitus, then press Enter to center the notch there. Best evidence is for TONAL tinnitus at or below ~8 kHz. Use headphones at a comfortable, low level, daily over weeks to months. This is an adjunct, not a cure - evidence is moderate with some null replications. Not medical advice; consult an audiologist.",
+  "master_vol": 0.4,
+  "notch_vol": 0.5,
+  "tinnitus_freq_hz": 6000.0,
+  "notch_width_oct": 0.5,
+  "notch_use_pink": true
+}

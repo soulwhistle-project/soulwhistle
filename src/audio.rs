@@ -62,9 +62,15 @@ pub struct AudioParams {
     pub pad_vol: f32, 
     pub pad_type: SignalType,
     
-    pub breath_vol: f32, 
+    pub breath_vol: f32,
     pub breath_type: SignalType,
-    
+
+    // Tinnitus notched sound therapy
+    pub notch_vol: f32,           // Volume of the notched-noise therapy layer
+    pub tinnitus_freq_hz: f32,    // Notch center = matched tinnitus pitch
+    pub notch_width_oct: f32,     // Notch width in octaves
+    pub notch_use_pink: bool,     // true = pink noise source, false = white
+
     pub master_vol: f32,
     pub playing: bool,
 
@@ -95,6 +101,11 @@ pub struct AudioParams {
     // Preset change tracking (for detecting when to reset synthesizer state)
     #[serde(skip)]
     pub preset_version: u32,
+
+    // Pitch-matching mode (runtime only): play a pure tone at tinnitus_freq_hz so
+    // the user can tune it to match their tinnitus before enabling the notch.
+    #[serde(skip)]
+    pub pitch_match_active: bool,
 }
 
 #[derive(Default)]
@@ -105,6 +116,7 @@ struct SignalComponents {
     chirp: f32,
     pad: f32,
     breath: f32,
+    notch: f32,
 }
 
 
@@ -134,6 +146,11 @@ impl Default for AudioParams {
             breath_vol: 0.0,
             breath_type: SignalType::LfoBreathing,
 
+            notch_vol: 0.0,
+            tinnitus_freq_hz: DEFAULT_TINNITUS_FREQ_HZ,
+            notch_width_oct: DEFAULT_NOTCH_WIDTH_OCT,
+            notch_use_pink: true,
+
             master_vol: DEFAULT_MASTER_VOLUME,
             playing: true,
 
@@ -154,6 +171,7 @@ impl Default for AudioParams {
             session_timer: 0.0,
             session_phase: crate::coherence::SessionPhase::Startup,
             preset_version: 0,
+            pitch_match_active: false,
         }
     }
 }
@@ -180,6 +198,10 @@ impl AudioParams {
             pad_type: self.pad_type,
             breath_vol: self.breath_vol,
             breath_type: self.breath_type,
+            notch_vol: self.notch_vol,
+            tinnitus_freq_hz: self.tinnitus_freq_hz,
+            notch_width_oct: self.notch_width_oct,
+            notch_use_pink: self.notch_use_pink,
             master_vol: self.master_vol,
             playing: self.playing,
             rf_enabled: self.rf_enabled,
@@ -195,6 +217,7 @@ impl AudioParams {
             session_timer: self.session_timer,
             session_phase: self.session_phase,
             preset_version: self.preset_version,
+            pitch_match_active: self.pitch_match_active,
         }
     }
 }
@@ -226,6 +249,15 @@ pub struct Synthesizer {
     // Noise
     rng: SmallRng,
 
+    // Pitch-match tone phase (pure sine at tinnitus_freq_hz)
+    phase_pitch_match: f32,
+
+    // Tinnitus notched sound therapy
+    pink: crate::dsp::PinkNoise,
+    notch: crate::dsp::BandReject,
+    last_notch_fc: f32,    // Cached to recompute notch coeffs only on change
+    last_notch_width: f32,
+
     // Neural Coherence binaural beat generator (public for session info access)
     pub coherence: crate::coherence::CoherenceSynth,
 
@@ -250,6 +282,11 @@ impl Synthesizer {
             breath_phase: 0.0,
             chirp_timer: 0.0,
             rng: SmallRng::from_os_rng(),
+            phase_pitch_match: 0.0,
+            pink: crate::dsp::PinkNoise::new(),
+            notch: crate::dsp::BandReject::new(),
+            last_notch_fc: -1.0,    // Force coefficient computation on first sample
+            last_notch_width: -1.0,
             coherence: crate::coherence::CoherenceSynth::new(sample_rate),
             dc_prev_in_l: 0.0,
             dc_prev_out_l: 0.0,
@@ -265,6 +302,17 @@ impl Synthesizer {
         }
 
         let dt = 1.0 / self.sample_rate;
+
+        // Pitch-matching: emit only a pure tone at the candidate tinnitus pitch so the
+        // user can tune it to match their tinnitus before enabling the notch.
+        if params.pitch_match_active {
+            let pi2 = 2.0 * std::f32::consts::PI;
+            self.phase_pitch_match =
+                (self.phase_pitch_match + params.tinnitus_freq_hz * dt * pi2) % pi2;
+            let tone = fast_sin(self.phase_pitch_match) * PITCH_MATCH_VOLUME * params.master_vol;
+            return (tone, tone);
+        }
+
         let components = self.generate_signal_components(params, dt);
 
         // Mix signal layer (mono)
@@ -279,6 +327,9 @@ impl Synthesizer {
             components.pad * params.pad_vol +
             components.breath * params.breath_vol
         };
+
+        // Tinnitus notched-noise therapy layer (independent of the signal-layer lock).
+        let signal_mixed = signal_mixed + components.notch * params.notch_vol;
 
         // Always update session timer (regardless of being type)
         self.coherence.update_timer(&params.coherence);
@@ -413,6 +464,31 @@ impl Synthesizer {
             _ => noise
         };
 
+        // 7. Tinnitus notched-noise therapy: broadband noise with a band of energy
+        //    removed around the matched tinnitus pitch (Okamoto 2010 / Stein 2016).
+        if params.notch_vol > 0.0 {
+            // Recompute notch coefficients only when pitch or width changes.
+            if params.tinnitus_freq_hz != self.last_notch_fc
+                || params.notch_width_oct != self.last_notch_width
+            {
+                self.notch.set_notch(
+                    self.sample_rate,
+                    params.tinnitus_freq_hz,
+                    params.notch_width_oct,
+                );
+                self.last_notch_fc = params.tinnitus_freq_hz;
+                self.last_notch_width = params.notch_width_oct;
+            }
+
+            let src_noise: f32 = self.rng.random::<f32>() * 2.0 - 1.0;
+            let source = if params.notch_use_pink {
+                self.pink.process(src_noise)
+            } else {
+                src_noise
+            };
+            components.notch = self.notch.process(source);
+        }
+
         components
     }
     
@@ -463,6 +539,13 @@ impl Synthesizer {
         self.phase_2_5khz = 0.0;
         self.breath_phase = 0.0;
         self.chirp_timer = 0.0;
+        self.phase_pitch_match = 0.0;
+
+        // Reset tinnitus therapy filter state (coeffs recomputed on next use)
+        self.pink.reset();
+        self.notch.reset();
+        self.last_notch_fc = -1.0;
+        self.last_notch_width = -1.0;
 
         // Reset DC filter state
         self.dc_prev_in_l = 0.0;

@@ -242,6 +242,32 @@ pub const PCM_I16_MAX: f32 = 32767.0;
 pub const AUDIO_CLAMP_MIN: f32 = -1.0;
 pub const AUDIO_CLAMP_MAX: f32 = 1.0;
 
+// === Tinnitus Notched Sound Therapy ===
+/// Default tinnitus pitch / notch center (Hz). Many tonal tinnitus pitches sit
+/// in the 4-8 kHz range; 6 kHz is a reasonable starting point before matching.
+pub const DEFAULT_TINNITUS_FREQ_HZ: f32 = 6000.0;
+
+/// Tinnitus pitch adjustable range (Hz). Notched therapy is best-evidenced for
+/// tonal tinnitus at or below ~8 kHz; upper bound left a little higher for matching.
+pub const TINNITUS_FREQ_MIN_HZ: f32 = 500.0;
+pub const TINNITUS_FREQ_MAX_HZ: f32 = 12000.0;
+
+/// Tinnitus pitch coarse / fine adjustment steps (Hz)
+pub const TINNITUS_FREQ_COARSE_STEP: f32 = 250.0;
+pub const TINNITUS_FREQ_FINE_STEP: f32 = 25.0;
+
+/// Default notch width (octaves). Stein et al. 2016 found narrower notches give
+/// stronger lateral inhibition than the 1-octave width of Okamoto et al. 2010.
+pub const DEFAULT_NOTCH_WIDTH_OCT: f32 = 0.5;
+
+/// Notch width adjustable range (octaves) and step
+pub const NOTCH_WIDTH_MIN_OCT: f32 = 0.25;
+pub const NOTCH_WIDTH_MAX_OCT: f32 = 1.0;
+pub const NOTCH_WIDTH_STEP_OCT: f32 = 0.05;
+
+/// Volume of the pure tone used during pitch-matching (kept gentle)
+pub const PITCH_MATCH_VOLUME: f32 = 0.15;
+
 // === Brainwave State Boundaries (Hz) ===
 pub const DELTA_MAX_HZ: f32 = 4.0;
 pub const THETA_MAX_HZ: f32 = 8.0;

@@ -48,6 +48,10 @@ pub const EMBEDDED_PRESETS: &[EmbeddedPreset] = &[
         content: include_str!("../presets/DEFAULT_focus_21_bridge.json"),
     },
     EmbeddedPreset {
+        filename: "DEFAULT_tinnitus_notch.json",
+        content: include_str!("../presets/DEFAULT_tinnitus_notch.json"),
+    },
+    EmbeddedPreset {
         filename: "DEFAULT_uap_brycehelm.json",
         content: include_str!("../presets/DEFAULT_uap_brycehelm.json"),
     },

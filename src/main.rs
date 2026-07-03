@@ -20,6 +20,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 mod audio;
 mod coherence;
+mod dsp;
 mod rf;
 mod streaming;
 mod constants;
@@ -36,6 +37,7 @@ use utils::{wrap_text, cycle_index};
 enum AppMode {
     Mixer,
     PresetSelect,
+    PitchMatch,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -92,6 +94,7 @@ struct App {
     signal_layer_collapsed: bool,
     hackrf_collapsed: bool,
     streaming_collapsed: bool,
+    tinnitus_collapsed: bool,
     preset_desc_mode: PresetDescMode,
 
     // Mapping from UI index to original channel index (for collapse toggle)
@@ -127,6 +130,11 @@ enum ChannelId {
     Chirp,
     Pad,
     Breath,
+    // Tinnitus Notched Sound Therapy
+    NotchVol,
+    TinnitusPitch,
+    NotchWidth,
+    NotchSource,
     // RF Controls
     RfEnable,
     RfFreq,
@@ -152,6 +160,7 @@ impl App {
             signal_layer_collapsed: false,  // Start expanded for visibility
             hackrf_collapsed: true,         // Start collapsed (advanced)
             streaming_collapsed: true,      // Start collapsed (experimental)
+            tinnitus_collapsed: true,       // Start collapsed (specialized therapy)
             preset_desc_mode: PresetDescMode::Hidden,  // Start hidden to save space
             visible_channel_indices: Vec::new(),
             rf_disclaimer_shown: false,
@@ -171,6 +180,11 @@ impl App {
                 ChannelInfo { name: "  Organic Chirps".to_string(), id: ChannelId::Chirp },
                 ChannelInfo { name: "  Ambient Pad (432Hz)".to_string(), id: ChannelId::Pad },
                 ChannelInfo { name: "  Breath Layer".to_string(), id: ChannelId::Breath },
+                ChannelInfo { name: "TINNITUS THERAPY [NOTCHED NOISE]".to_string(), id: ChannelId::NotchVol },
+                ChannelInfo { name: "  Notched Noise Vol".to_string(), id: ChannelId::NotchVol },
+                ChannelInfo { name: "  Tinnitus Pitch".to_string(), id: ChannelId::TinnitusPitch },
+                ChannelInfo { name: "  Notch Width".to_string(), id: ChannelId::NotchWidth },
+                ChannelInfo { name: "  Notch Source".to_string(), id: ChannelId::NotchSource },
                 ChannelInfo { name: "HACKRF TRANSMIT".to_string(), id: ChannelId::RfEnable },
                 ChannelInfo { name: "  RF Enable".to_string(), id: ChannelId::RfEnable },
                 ChannelInfo { name: "  RF Frequency".to_string(), id: ChannelId::RfFreq },
@@ -215,6 +229,7 @@ impl App {
                 let i = cycle_index(self.preset_state.selected().unwrap_or(0), self.preset_list.len(), 1);
                 self.preset_state.select(Some(i));
             }
+            AppMode::PitchMatch => {}
         }
     }
 
@@ -230,6 +245,7 @@ impl App {
                 let i = cycle_index(self.preset_state.selected().unwrap_or(0), self.preset_list.len(), -1);
                 self.preset_state.select(Some(i));
             }
+            AppMode::PitchMatch => {}
         }
     }
 
@@ -341,7 +357,22 @@ impl App {
                 ChannelId::Chirp => params.chirp_vol = (params.chirp_vol + delta).clamp(0.0, 1.0),
                 ChannelId::Pad => params.pad_vol = (params.pad_vol + delta).clamp(0.0, 1.0),
                 ChannelId::Breath => params.breath_vol = (params.breath_vol + delta).clamp(0.0, 1.0),
-                
+
+                ChannelId::NotchVol => params.notch_vol = (params.notch_vol + delta).clamp(0.0, 1.0),
+                ChannelId::TinnitusPitch => {
+                    let step = if delta.abs() > 0.05 { TINNITUS_FREQ_COARSE_STEP } else { TINNITUS_FREQ_FINE_STEP };
+                    params.tinnitus_freq_hz = (params.tinnitus_freq_hz + delta.signum() * step)
+                        .clamp(TINNITUS_FREQ_MIN_HZ, TINNITUS_FREQ_MAX_HZ);
+                },
+                ChannelId::NotchWidth => {
+                    params.notch_width_oct = (params.notch_width_oct + delta.signum() * NOTCH_WIDTH_STEP_OCT)
+                        .clamp(NOTCH_WIDTH_MIN_OCT, NOTCH_WIDTH_MAX_OCT);
+                },
+                ChannelId::NotchSource => {
+                    // Toggle pink/white with arrows (also cycled via 'o')
+                    params.notch_use_pink = delta > 0.0;
+                },
+
                 ChannelId::RfEnable => {
                     // Show disclaimer first time user tries to enable RF
                     if delta > 0.0 && !params.rf_enabled && !self.rf_disclaimer_shown {
@@ -460,6 +491,7 @@ impl App {
                 ChannelId::Chirp => Self::toggle_volume(&mut params.chirp_vol),
                 ChannelId::Pad => Self::toggle_volume(&mut params.pad_vol),
                 ChannelId::Breath => Self::toggle_volume(&mut params.breath_vol),
+                ChannelId::NotchVol => Self::toggle_volume(&mut params.notch_vol),
                 _ => {} // Other channels don't support mute
             }
         }
@@ -526,6 +558,9 @@ impl App {
                          SignalType::PinkNoise => SignalType::Sine, // Drone
                          _ => SignalType::LfoBreathing,
                      };
+                 },
+                 ChannelId::NotchSource => {
+                     params.notch_use_pink = !params.notch_use_pink;
                  },
                   ChannelId::RfMode => {
                       // Cycle RF Modulation Mode
@@ -641,6 +676,45 @@ impl App {
     
     fn exit_preset_mode(&mut self) {
         self.mode = AppMode::Mixer;
+    }
+
+    /// Enter pitch-matching: play a pure tone at the current tinnitus pitch so the
+    /// user can tune it to match their tinnitus.
+    fn enter_pitch_match(&mut self) {
+        self.mode = AppMode::PitchMatch;
+        self.params.lock().pitch_match_active = true;
+    }
+
+    /// Cancel pitch-matching without changing the therapy layer.
+    fn cancel_pitch_match(&mut self) {
+        self.params.lock().pitch_match_active = false;
+        self.mode = AppMode::Mixer;
+    }
+
+    /// Lock the matched pitch as the notch center and enable the therapy layer.
+    fn confirm_pitch_match(&mut self) {
+        let hz = {
+            let mut params = self.params.lock();
+            params.pitch_match_active = false;
+            // Auto-enable the notched-noise layer if it was silent.
+            if params.notch_vol <= 0.0 {
+                params.notch_vol = 0.5;
+            }
+            params.tinnitus_freq_hz
+        };
+        self.mode = AppMode::Mixer;
+        self.status_msg = Some((
+            format!("Notch centered at {:.0} Hz — notched noise enabled", hz),
+            std::time::Instant::now(),
+        ));
+    }
+
+    /// Adjust the candidate tinnitus pitch during matching (coarse/fine by step size).
+    fn adjust_tinnitus_pitch(&mut self, delta: f32) {
+        let mut params = self.params.lock();
+        let step = if delta.abs() > 0.05 { TINNITUS_FREQ_COARSE_STEP } else { TINNITUS_FREQ_FINE_STEP };
+        params.tinnitus_freq_hz = (params.tinnitus_freq_hz + delta.signum() * step)
+            .clamp(TINNITUS_FREQ_MIN_HZ, TINNITUS_FREQ_MAX_HZ);
     }
     
     fn load_selected_preset(&mut self) {
@@ -848,6 +922,11 @@ impl App {
                             self.streaming_collapsed = !self.streaming_collapsed;
                             let state = if self.streaming_collapsed { "collapsed" } else { "expanded" };
                             self.status_msg = Some((format!("Network Streaming {}", state), std::time::Instant::now()));
+                        },
+                        name if name.starts_with("TINNITUS THERAPY") => {
+                            self.tinnitus_collapsed = !self.tinnitus_collapsed;
+                            let state = if self.tinnitus_collapsed { "collapsed" } else { "expanded" };
+                            self.status_msg = Some((format!("Tinnitus Therapy {}", state), std::time::Instant::now()));
                         },
                         _ => {}
                     }
@@ -1209,10 +1288,23 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App, error_rx: std::
                                 KeyCode::Char('m') => app.toggle_mute(),
                                 KeyCode::Char(' ') => app.toggle_playback(),
                                 KeyCode::Char('x') => app.toggle_collapse(),
+                                KeyCode::Char('t') => app.enter_pitch_match(),
                                 KeyCode::Down | KeyCode::Char('j') => app.next(),
                                 KeyCode::Up | KeyCode::Char('k') => app.previous(),
                                 KeyCode::Left | KeyCode::Char('h') => app.adjust_volume(-0.01),
                                 KeyCode::Right => app.adjust_volume(0.01),
+                                _ => {}
+                            }
+                        },
+                        AppMode::PitchMatch => {
+                            match key.code {
+                                KeyCode::Enter => app.confirm_pitch_match(),
+                                KeyCode::Esc | KeyCode::Char('q') => app.cancel_pitch_match(),
+                                // Coarse adjust on Up/Down, fine on Left/Right
+                                KeyCode::Up | KeyCode::Char('k') => app.adjust_tinnitus_pitch(1.0),
+                                KeyCode::Down | KeyCode::Char('j') => app.adjust_tinnitus_pitch(-1.0),
+                                KeyCode::Right | KeyCode::Char('l') => app.adjust_tinnitus_pitch(0.01),
+                                KeyCode::Left | KeyCode::Char('h') => app.adjust_tinnitus_pitch(-0.01),
                                 _ => {}
                             }
                         },
@@ -1241,6 +1333,7 @@ fn ui(f: &mut Frame, app: &mut App) {
     match app.mode {
         AppMode::Mixer => draw_mixer(f, app, chunks[0]),
         AppMode::PresetSelect => draw_preset_list(f, app, chunks[0]),
+        AppMode::PitchMatch => draw_pitch_match(f, app, chunks[0]),
     }
 
     // Build compact 2-line status display
@@ -1331,13 +1424,13 @@ fn ui(f: &mut Frame, app: &mut App) {
     }
 
     // Line 2: Keybindings | Status message
-    let mut line2_str = "[m]ute [o]scillator [r]ecord [Space]pause [q]uit".to_string();
+    let mut line2_str = "[m]ute [o]scillator [t]innitus [r]ecord [Space]pause [q]uit".to_string();
 
     if let Some((text, time)) = &app.status_msg {
         // Show warnings (⚠️) for longer
         let timeout = if text.starts_with("⚠️") { STATUS_WARNING_TIMEOUT_SECS } else { STATUS_TIMEOUT_SECS };
         if time.elapsed() < std::time::Duration::from_secs(timeout) {
-            line2_str = format!("[m]ute [o]scillator [r]ecord [Space]pause [q]uit | STATUS: {}", text);
+            line2_str = format!("[m]ute [o]scillator [t]innitus [r]ecord [Space]pause [q]uit | STATUS: {}", text);
         }
     }
 
@@ -1350,6 +1443,50 @@ fn ui(f: &mut Frame, app: &mut App) {
     let instructions = Paragraph::new(status_lines)
         .block(Block::default().borders(Borders::ALL));
     f.render_widget(instructions, chunks[1]);
+}
+
+fn draw_pitch_match(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let hz = app.params.lock().tinnitus_freq_hz;
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "  TINNITUS PITCH MATCHING",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from("  A pure tone is playing. Tune it until it matches the pitch of"),
+        Line::from("  your tinnitus, then press Enter to center the notch there."),
+        Line::from("  🎧 Use headphones at a comfortable, low volume."),
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("  Current pitch:  "),
+            Span::styled(
+                format!("{:.0} Hz", hz),
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  ↑/↓  coarse (±250 Hz)    ←/→  fine (±25 Hz)",
+            Style::default().fg(Color::Gray),
+        )),
+        Line::from(Span::styled(
+            "  Enter  lock pitch & enable notch     Esc  cancel",
+            Style::default().fg(Color::Gray),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Note: notched therapy works best for tonal tinnitus ≤ 8 kHz,",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(Span::styled(
+            "  used daily over weeks. It is an adjunct, not a quick fix.",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+    let panel = Paragraph::new(lines)
+        .block(Block::default().borders(Borders::ALL).title(" Pitch Match "));
+    f.render_widget(panel, area);
 }
 
 fn draw_preset_list(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
@@ -1484,6 +1621,9 @@ fn draw_mixer(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                         if parent.name.starts_with("NETWORK STREAMING") && app.streaming_collapsed {
                             return None;
                         }
+                        if parent.name.starts_with("TINNITUS THERAPY") && app.tinnitus_collapsed {
+                            return None;
+                        }
                         break;
                     }
                 }
@@ -1559,10 +1699,12 @@ fn draw_mixer(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
             // Collapsible section headers
             if chan.name == "SIGNAL LAYER" || chan.name == "HACKRF TRANSMIT"
                 || chan.name.starts_with("NETWORK STREAMING")
+                || chan.name.starts_with("TINNITUS THERAPY")
             {
                 let (collapsed, item_count) = match chan.name.as_str() {
                     "SIGNAL LAYER" => (app.signal_layer_collapsed, 7),
                     "HACKRF TRANSMIT" => (app.hackrf_collapsed, 5),
+                    name if name.starts_with("TINNITUS THERAPY") => (app.tinnitus_collapsed, 4),
                     _ => (app.streaming_collapsed, 2),
                 };
                 let indicator = if collapsed { "[+]" } else { "[-]" };
@@ -1598,6 +1740,18 @@ fn draw_mixer(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                 ChannelId::PingFreq => {
                     format!("{:<40} {:.2}kHz (arrows to adjust)",
                         chan.name, params.ping_freq_hz / 1000.0)
+                },
+                ChannelId::TinnitusPitch => {
+                    format!("{:<40} {:.0} Hz  [t] match tinnitus pitch",
+                        chan.name, params.tinnitus_freq_hz)
+                },
+                ChannelId::NotchWidth => {
+                    format!("{:<40} {:.2} oct (arrows to adjust)",
+                        chan.name, params.notch_width_oct)
+                },
+                ChannelId::NotchSource => {
+                    let src = if params.notch_use_pink { "Pink noise" } else { "White noise" };
+                    format!("{:<40} {} (press o)", chan.name, src)
                 },
                 ChannelId::BinauralAdjust => {
                     if matches!(params.coherence.being_type, BeingType::HumanCustom) {
@@ -1669,6 +1823,7 @@ fn draw_mixer(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                         ChannelId::Chirp => (params.chirp_vol, Some(params.chirp_type)),
                         ChannelId::Pad => (params.pad_vol, Some(params.pad_type)),
                         ChannelId::Breath => (params.breath_vol, Some(params.breath_type)),
+                        ChannelId::NotchVol => (params.notch_vol, None),
                         _ => (0.0, None),
                     };
                     let is_signal_channel = matches!(chan.id,
