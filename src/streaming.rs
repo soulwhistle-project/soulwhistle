@@ -37,9 +37,15 @@ impl AudioRingBuffer {
     }
 
     /// Push multiple stereo samples into the ring buffer (batch operation)
-    /// Single lock acquisition for entire batch - critical for realtime audio
+    /// Single lock acquisition for entire batch - critical for realtime audio.
+    /// Uses `try_lock` so the real-time audio callback never blocks waiting on a
+    /// streaming reader. On contention the whole batch is dropped and `write_count`
+    /// does not advance, so readers never see the gap: listeners hear a short
+    /// discontinuity (a click) instead of the audio device glitching for everyone.
     pub fn push_samples_batch(&self, samples: &[(f32, f32)]) {
-        let mut st = self.state.lock();
+        let Some(mut st) = self.state.try_lock() else {
+            return;
+        };
         for &(left, right) in samples {
             if st.samples.len() >= self.capacity {
                 st.samples.pop_front(); // Remove oldest sample
@@ -54,16 +60,22 @@ impl AudioRingBuffer {
         self.sample_rate
     }
 
-    /// Flush the buffer (clear all samples) and increment epoch to force client reconnects
-    pub fn flush(&self) {
-        {
-            let mut st = self.state.lock();
-            st.samples.clear();
-            // Keep write_count monotonic so readers don't see the index jump backwards.
-        }
+    /// Flush the buffer (clear all samples) and increment epoch to force client reconnects.
+    ///
+    /// Called from the real-time audio callback, so it never blocks: returns
+    /// `false` if a streaming reader holds the lock, and the caller retries on the
+    /// next callback. The epoch only moves once the clear has actually happened.
+    pub fn try_flush(&self) -> bool {
+        let Some(mut st) = self.state.try_lock() else {
+            return false;
+        };
+        st.samples.clear();
+        // Keep write_count monotonic so readers don't see the index jump backwards.
+        drop(st);
 
         // Increment epoch to signal preset change to active streaming clients
         self.stream_epoch.fetch_add(1, Ordering::Release);
+        true
     }
 
     /// Get current stream epoch (for detecting preset changes in streaming clients)

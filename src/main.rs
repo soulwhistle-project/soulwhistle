@@ -54,12 +54,34 @@ struct PresetInfo {
     experimental: Option<bool>,
 }
 
-/// Shared state for WAV recording between audio callback and UI
+/// Message sent from the real-time audio callback to the recording writer thread.
+enum RecordingMsg {
+    Data(Vec<u8>),
+    Stop,
+}
+
+/// Number of PCM buffers circulating between the audio callback and the writer.
+/// Each holds one callback's worth of samples; the callback can run this many
+/// callbacks ahead of the disk before it starts dropping blocks.
+const REC_POOL_BUFFERS: usize = 32;
+/// Initial capacity of each pooled buffer: 8192 stereo i16 frames (32 KiB), larger
+/// than any callback size cpal normally delivers, so filling it never reallocates.
+const REC_BUFFER_BYTES: usize = 8192 * WAV_BLOCK_ALIGN as usize;
+
+/// Shared state for WAV recording between audio callback and UI.
+///
+/// Real-time rules: the audio callback never allocates, never blocks and never
+/// touches the disk for recording. Buffers are pre-allocated in a pool; the
+/// callback takes a free one (`pool_rx`), fills it and hands it to the writer
+/// thread with a non-blocking `try_send` on a bounded channel; the writer writes
+/// it to disk and returns it to the pool. If the writer falls behind and no buffer
+/// is free, the callback drops that block and counts it in `dropped_blocks`.
 struct RecordingState {
     active: bool,
-    writer: Option<std::io::BufWriter<File>>,
-    samples_written: u32,
-    sample_rate: u32,
+    tx: Option<std::sync::mpsc::SyncSender<RecordingMsg>>,
+    pool_rx: Option<std::sync::mpsc::Receiver<Vec<u8>>>,
+    writer: Option<std::thread::JoinHandle<()>>,
+    dropped_blocks: Arc<std::sync::atomic::AtomicU64>,
     filepath: Option<String>,
 }
 
@@ -67,12 +89,81 @@ impl RecordingState {
     fn new() -> Self {
         Self {
             active: false,
+            tx: None,
+            pool_rx: None,
             writer: None,
-            samples_written: 0,
-            sample_rate: 48000,
+            dropped_blocks: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             filepath: None,
         }
     }
+}
+
+/// Stop the active recording, if any, and wait until the WAV file is complete
+/// (header patched, buffers flushed). Returns the file path and the number of
+/// blocks dropped because the writer fell behind.
+///
+/// Must be called before the process exits, or the writer thread is killed
+/// mid-file and the header keeps its zero placeholder sizes.
+fn stop_recording(recording: &Mutex<RecordingState>) -> Option<(String, u64)> {
+    let (tx, writer, path, dropped) = {
+        let mut rec = recording.lock();
+        if !rec.active {
+            return None;
+        }
+        rec.active = false;
+        rec.pool_rx = None;
+        (
+            rec.tx.take(),
+            rec.writer.take(),
+            rec.filepath.take().unwrap_or_default(),
+            rec.dropped_blocks.swap(0, std::sync::atomic::Ordering::Relaxed),
+        )
+    }; // lock released before waiting, so the audio callback is never held up
+
+    if let Some(tx) = tx {
+        // Blocking send is fine here: this is the UI thread, and the writer is
+        // draining the channel.
+        let _ = tx.send(RecordingMsg::Stop);
+    }
+    if let Some(handle) = writer {
+        let _ = handle.join();
+    }
+    Some((path, dropped))
+}
+
+/// Owns the WAV file and performs all disk I/O for one recording session.
+/// Runs on its own thread; the audio callback only ever sends it buffers, which
+/// are returned through `pool_tx` once written.
+fn run_recording_writer(
+    mut writer: std::io::BufWriter<File>,
+    rx: std::sync::mpsc::Receiver<RecordingMsg>,
+    pool_tx: std::sync::mpsc::SyncSender<Vec<u8>>,
+) {
+    // u64 so a long session cannot overflow the counter; the WAV header itself
+    // is 32-bit, so sizes are clamped there (files over 4 GiB are not valid WAV).
+    let mut bytes_written: u64 = 0;
+    for msg in rx {
+        match msg {
+            RecordingMsg::Data(buf) => {
+                if writer.write_all(&buf).is_ok() {
+                    bytes_written += buf.len() as u64;
+                }
+                let _ = pool_tx.try_send(buf);
+            }
+            RecordingMsg::Stop => break,
+        }
+    }
+
+    // Finalize the WAV header now that the real size is known.
+    let data_size = bytes_written.min((u32::MAX - 36) as u64) as u32;
+    let file_size = data_size + 36; // 44 byte header - 8 byte RIFF preamble
+    if writer.seek(SeekFrom::Start(4)).is_ok() {
+        let _ = writer.write_all(&file_size.to_le_bytes());
+    }
+    if writer.seek(SeekFrom::Start(40)).is_ok() {
+        let _ = writer.write_all(&data_size.to_le_bytes());
+    }
+    let _ = writer.flush();
 }
 
 struct App {
@@ -796,30 +887,13 @@ impl App {
     }
 
     fn toggle_recording(&mut self, sample_rate: u32) {
-        let mut rec = self.recording.lock();
-        if rec.active {
-            // Stop recording — finalize WAV header
-            let data_size = rec.samples_written * WAV_BLOCK_ALIGN as u32;
-            let file_size = data_size + 36; // 44 byte header - 8 byte RIFF preamble
-            if let Some(ref mut writer) = rec.writer {
-                // Patch RIFF size (offset 4)
-                if writer.seek(SeekFrom::Start(4)).is_ok() {
-                    let _ = writer.write_all(&file_size.to_le_bytes());
-                }
-                // Patch data chunk size (offset 40)
-                if writer.seek(SeekFrom::Start(40)).is_ok() {
-                    let _ = writer.write_all(&data_size.to_le_bytes());
-                }
-                let _ = writer.flush();
-            }
-            let path = rec.filepath.take().unwrap_or_default();
-            rec.active = false;
-            rec.writer = None;
-            rec.samples_written = 0;
-            self.status_msg = Some((
-                format!("Recording saved: {}", path),
-                std::time::Instant::now(),
-            ));
+        if let Some((path, dropped)) = stop_recording(&self.recording) {
+            let msg = if dropped > 0 {
+                format!("Recording saved: {} ({} blocks dropped, disk too slow)", path, dropped)
+            } else {
+                format!("Recording saved: {}", path)
+            };
+            self.status_msg = Some((msg, std::time::Instant::now()));
         } else {
             // Start recording — create WAV file
             let recordings_dir = get_presets_dir().parent()
@@ -866,10 +940,32 @@ impl App {
                         ));
                         return;
                     }
+                    // All allocation happens here, on the UI thread, never in the callback.
+                    let (tx, rx) = std::sync::mpsc::sync_channel::<RecordingMsg>(REC_POOL_BUFFERS);
+                    let (pool_tx, pool_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(REC_POOL_BUFFERS);
+                    for _ in 0..REC_POOL_BUFFERS {
+                        let _ = pool_tx.try_send(Vec::with_capacity(REC_BUFFER_BYTES));
+                    }
+                    let handle = std::thread::Builder::new()
+                        .name("wav-writer".into())
+                        .spawn(move || run_recording_writer(writer, rx, pool_tx));
+                    let handle = match handle {
+                        Ok(h) => h,
+                        Err(e) => {
+                            self.status_msg = Some((
+                                format!("Error starting recording thread: {}", e),
+                                std::time::Instant::now(),
+                            ));
+                            return;
+                        }
+                    };
+
+                    let mut rec = self.recording.lock();
                     rec.active = true;
-                    rec.writer = Some(writer);
-                    rec.samples_written = 0;
-                    rec.sample_rate = sample_rate;
+                    rec.tx = Some(tx);
+                    rec.pool_rx = Some(pool_rx);
+                    rec.writer = Some(handle);
+                    rec.dropped_blocks.store(0, std::sync::atomic::Ordering::Relaxed);
                     rec.filepath = Some(path.display().to_string());
                     self.status_msg = Some((
                         format!("Recording to {}", filename),
@@ -1113,11 +1209,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
+    let recording_for_exit = recording_state.clone();
     let mut app = App::new(params, stream_client_count_for_app, recording_state);
     app.current_preset = loaded_preset_name;
     app.refresh_presets();
     
     let res = run_app(&mut terminal, app, error_rx, sample_rate as u32);
+
+    // Complete an in-progress recording before exiting, or the WAV is left with
+    // zero sizes in its header and the last buffered audio is lost.
+    let saved_recording = stop_recording(&recording_for_exit);
 
     // Restore terminal
     disable_raw_mode()?;
@@ -1127,6 +1228,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         DisableMouseCapture
     )?;
     terminal.show_cursor()?;
+
+    if let Some((path, dropped)) = saved_recording {
+        println!("Recording saved: {}", path);
+        if dropped > 0 {
+            println!("Warning: {} blocks dropped (disk too slow)", dropped);
+        }
+    }
 
     if let Err(err) = res {
         println!("{:?}", err)
@@ -1159,10 +1267,15 @@ where
 
     // Pre-allocate streaming sample buffer — reused each callback via clear()
     // Avoids heap allocation in the audio callback hot path
-    let mut stream_samples: Vec<(f32, f32)> = Vec::with_capacity(1024);
+    // Sized above any normal callback (BufferSize::Default can exceed 1024 frames).
+    let mut stream_samples: Vec<(f32, f32)> = Vec::with_capacity(8192);
 
-    // Pre-allocate recording PCM buffer (i16 LE pairs)
-    let mut rec_buf: Vec<u8> = Vec::with_capacity(4096);
+    // Set on preset change; cleared once the streaming buffer flush succeeds.
+    let mut flush_pending = false;
+
+    // A recording buffer taken from the pool but not yet handed to the writer
+    // (kept when the writer queue was full, reused on the next callback).
+    let mut rec_spare: Option<Vec<u8>> = None;
 
     let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
 
@@ -1181,21 +1294,34 @@ where
             if p.preset_version != last_preset_version {
                 // Preset changed - reset synthesizer state and flush streaming buffer
                 synth.reset();
-                stream_buffer.flush();
+                flush_pending = true;
 
                 // Start crossfade
                 crossfade_samples_remaining = crossfade_duration_samples;
                 last_preset_version = p.preset_version;
             }
 
+            // Non-blocking flush; retried each callback until the reader lets go.
+            if flush_pending && stream_buffer.try_flush() {
+                flush_pending = false;
+            }
+
             // Reuse pre-allocated buffer (clear keeps capacity, zero allocs)
             stream_samples.clear();
 
-            // Check recording state once per callback (avoid per-sample lock)
-            let is_recording = recording.try_lock()
-                .map(|r| r.active)
-                .unwrap_or(false);
-            let collect_samples = p.stream_enabled || is_recording;
+            // Check recording state once per callback (avoid per-sample lock).
+            // Under a try_lock we only clone the sender and the drop counter
+            // (refcount bumps) and take a free pooled buffer: no allocation, no I/O.
+            let rec_session = recording.try_lock().and_then(|r| {
+                if !r.active {
+                    return None;
+                }
+                let tx = r.tx.clone()?;
+                let buf = rec_spare.take()
+                    .or_else(|| r.pool_rx.as_ref().and_then(|p| p.try_recv().ok()));
+                Some((tx, buf, r.dropped_blocks.clone()))
+            });
+            let collect_samples = p.stream_enabled || rec_session.is_some();
 
             for frame in data.chunks_mut(channels) {
                 let (mut left_sample_f32, mut right_sample_f32) = synth.next_sample(p);
@@ -1231,21 +1357,31 @@ where
                 stream_buffer.push_samples_batch(&stream_samples);
             }
 
-            // Write to WAV recording if active (try_lock to avoid blocking)
-            if is_recording && !stream_samples.is_empty() {
-                if let Some(mut rec) = recording.try_lock() {
-                    if rec.active {
-                        rec_buf.clear();
-                        for &(l, r) in &stream_samples {
-                            let li = (l.clamp(-1.0, 1.0) * PCM_I16_MAX) as i16;
-                            let ri = (r.clamp(-1.0, 1.0) * PCM_I16_MAX) as i16;
-                            rec_buf.extend_from_slice(&li.to_le_bytes());
-                            rec_buf.extend_from_slice(&ri.to_le_bytes());
+            // Hand recording bytes to the writer thread: a non-blocking try_send of a
+            // pooled buffer. Disk I/O happens on the writer thread.
+            if let Some((tx, buf, dropped)) = rec_session {
+                if !stream_samples.is_empty() {
+                    match buf {
+                        Some(mut buf) => {
+                            buf.clear();
+                            for &(l, r) in &stream_samples {
+                                let li = (l.clamp(-1.0, 1.0) * PCM_I16_MAX) as i16;
+                                let ri = (r.clamp(-1.0, 1.0) * PCM_I16_MAX) as i16;
+                                buf.extend_from_slice(&li.to_le_bytes());
+                                buf.extend_from_slice(&ri.to_le_bytes());
+                            }
+                            if let Err(std::sync::mpsc::TrySendError::Full(RecordingMsg::Data(b))) =
+                                tx.try_send(RecordingMsg::Data(buf))
+                            {
+                                // Writer queue full: keep the buffer for next time.
+                                rec_spare = Some(b);
+                                dropped.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            }
                         }
-                        if let Some(ref mut writer) = rec.writer {
-                            let _ = writer.write_all(&rec_buf);
+                        // No free buffer: the writer is behind the disk.
+                        None => {
+                            dropped.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         }
-                        rec.samples_written += (rec_buf.len() / 4) as u32;
                     }
                 }
             }
@@ -1858,4 +1994,38 @@ fn draw_mixer(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
         .highlight_symbol(">> ");
 
     f.render_stateful_widget(list, list_area, &mut app.state);
+}
+
+#[cfg(test)]
+mod recording_tests {
+    use super::*;
+
+    #[test]
+    fn writer_patches_wav_header_and_recycles_buffers() {
+        let dir = std::env::temp_dir().join(format!("soulwhistle-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("rec.wav");
+        let mut writer = std::io::BufWriter::new(File::create(&path).unwrap());
+        writer.write_all(&[0u8; 44]).unwrap(); // header placeholder
+
+        let (tx, rx) = std::sync::mpsc::sync_channel::<RecordingMsg>(4);
+        let (pool_tx, pool_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(4);
+        let handle = std::thread::spawn(move || run_recording_writer(writer, rx, pool_tx));
+
+        // Two blocks of 100 stereo frames each (4 bytes per frame).
+        tx.send(RecordingMsg::Data(vec![1u8; 400])).unwrap();
+        tx.send(RecordingMsg::Data(vec![2u8; 400])).unwrap();
+        tx.send(RecordingMsg::Stop).unwrap();
+        handle.join().unwrap();
+
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(bytes.len(), 44 + 800);
+        let riff = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+        let data = u32::from_le_bytes(bytes[40..44].try_into().unwrap());
+        assert_eq!(data, 800);
+        assert_eq!(riff, 800 + 36);
+        // Both buffers came back to the pool for reuse.
+        assert_eq!(pool_rx.try_iter().count(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
