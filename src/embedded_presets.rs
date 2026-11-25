@@ -28,6 +28,10 @@ pub const EMBEDDED_PRESETS: &[EmbeddedPreset] = &[
         content: include_str!("../presets/DEFAULT_deep_focus_peak.json"),
     },
     EmbeddedPreset {
+        filename: "DEFAULT_gamma_40hz_pulses.json",
+        content: include_str!("../presets/DEFAULT_gamma_40hz_pulses.json"),
+    },
+    EmbeddedPreset {
         filename: "DEFAULT_explore_all.json",
         content: include_str!("../presets/DEFAULT_explore_all.json"),
     },

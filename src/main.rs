@@ -627,6 +627,7 @@ impl App {
                      params.ping_type = match params.ping_type {
                          SignalType::Sine => SignalType::Square,
                          SignalType::Square => SignalType::Saw,
+                         SignalType::Saw => SignalType::GammaPulse,
                          _ => SignalType::Sine,
                      };
                  },

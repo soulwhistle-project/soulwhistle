@@ -98,6 +98,7 @@ Soulwhistle includes presets based on peer-reviewed research and established pro
 - **Deep Focus - ADHD Primary**: 10 Hz alpha
 - **Deep Focus - SMR**: 14 Hz beta (experimental)
 - **Deep Focus - Gamma**: 40 Hz (experimental; evidence for 40 Hz binaural beats is weak, see `CITATIONS.md`)
+- **Gamma 40 Hz Pulses**: the pulsed stimulus of the 40 Hz studies (1 ms tones at 10 kHz, 40 per second; Martorell et al. 2019), same in both ears (experimental)
 
 ### Monroe Institute-Derived Examples
 These presets are based on independent FFT analysis of Monroe Institute techniques:

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- New "Gamma 40 Hz Pulses" preset and `GammaPulse` ping type: 1 ms tones at 10 kHz, 40 per second, as in Martorell et al. 2019
+- explore_all: carriers moved to 300/307.5 Hz so its 220 Hz harmonic and 432 Hz pad no longer beat against them; adjusting the beat keeps the preset's carrier
+- Deep Focus presets renamed to match their titles (`DEFAULT_deep_focus_adhd_alpha.json`, `DEFAULT_deep_focus_smr.json`); old copies are moved aside as `.bak`
+
 ## v0.3.0 (2026-11-25)
 
 ### Sound quality

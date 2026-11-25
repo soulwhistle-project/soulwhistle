@@ -20,6 +20,11 @@ pub const VERDI_A_HZ: f32 = 432.0;
 /// Default ultrasonic ping frequency (17 kHz)
 pub const DEFAULT_ULTRASONIC_PING_HZ: f32 = 17000.0;
 
+/// GammaPulse ping type: burst rate and burst length (Martorell et al. 2019:
+/// 1 ms tones repeated at 40 Hz). The tone is the ping frequency (10 kHz there).
+pub const GAMMA_PULSE_RATE_HZ: f64 = 40.0;
+pub const GAMMA_PULSE_DURATION_S: f64 = 0.001;
+
 /// Default chirp base frequency
 pub const CHIRP_BASE_HZ: f32 = 2500.0;
 

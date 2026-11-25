@@ -20,6 +20,11 @@ pub enum SignalType {
     Square,
     Saw,
 
+    // Pulsed tone (ping layer): bursts of the ping frequency, GAMMA_PULSE_DURATION_S
+    // long, GAMMA_PULSE_RATE_HZ times per second. Martorell et al. 2019 (Cell) used
+    // 1 ms tones at 10 kHz repeated at 40 Hz. Same signal in both ears.
+    GammaPulse,
+
     // Noise
     WhiteNoise,
     PinkNoise,
@@ -237,6 +242,7 @@ pub struct Synthesizer {
     phase_7_83hz: f32,
     phase_528hz: f32,
     phase_17khz: f32,
+    pulse_time: f64, // Seconds into the current GammaPulse period
     phase_432hz: f32,
     phase_2_5khz: f32,
 
@@ -278,6 +284,7 @@ impl Synthesizer {
             phase_7_83hz: 0.0,
             phase_528hz: 0.0,
             phase_17khz: 0.0,
+            pulse_time: 0.0,
             phase_432hz: 0.0,
             phase_2_5khz: 0.0,
             breath_phase: 0.0,
@@ -404,6 +411,20 @@ impl Synthesizer {
         self.phase_17khz = (self.phase_17khz + params.ping_freq_hz * dt * pi2) % pi2;
         components.ping = if params.ping_freq_hz > nyquist_limit {
             0.0
+        } else if params.ping_type == SignalType::GammaPulse {
+            // Each burst starts at phase zero, so every pulse is identical.
+            let t = self.pulse_time;
+            let y = if t < GAMMA_PULSE_DURATION_S {
+                fast_sin((t * params.ping_freq_hz as f64 * std::f64::consts::TAU) as f32)
+            } else {
+                0.0
+            };
+            self.pulse_time += dt as f64;
+            let period = 1.0 / GAMMA_PULSE_RATE_HZ;
+            if self.pulse_time >= period {
+                self.pulse_time -= period;
+            }
+            y
         } else {
             generate_waveform(self.phase_17khz, params.ping_type,
                 harmonics_below(params.ping_freq_hz, nyquist_limit))
@@ -542,6 +563,7 @@ impl Synthesizer {
         self.phase_7_83hz = 0.0;
         self.phase_528hz = 0.0;
         self.phase_17khz = 0.0;
+        self.pulse_time = 0.0;
         self.phase_432hz = 0.0;
         self.phase_2_5khz = 0.0;
         self.breath_phase = 0.0;
@@ -562,5 +584,38 @@ impl Synthesizer {
 
         // Reset coherence synthesizer (session timer, gamma bursts, etc.)
         self.coherence.reset();
+    }
+}
+
+#[cfg(test)]
+mod gamma_pulse_tests {
+    use super::*;
+
+    /// One second at 48 kHz: 40 bursts, each 1 ms (48 samples) of the ping tone,
+    /// silence in between, and every burst identical.
+    #[test]
+    fn gamma_pulse_matches_published_stimulus() {
+        let fs = 48000.0f32;
+        let mut synth = Synthesizer::new(fs);
+        let mut params = AudioParams::default();
+        params.ping_type = SignalType::GammaPulse;
+        params.ping_freq_hz = 10000.0;
+        let dt = 1.0 / fs;
+        let samples: Vec<f32> = (0..fs as usize)
+            .map(|_| synth.generate_signal_components(&params, dt).ping)
+            .collect();
+
+        let period = (fs as f64 / GAMMA_PULSE_RATE_HZ).round() as usize; // 1200
+        let burst = (fs as f64 * GAMMA_PULSE_DURATION_S).round() as usize; // 48
+        let mut bursts = 0;
+        for (i, chunk) in samples.chunks(period).enumerate() {
+            assert!(chunk[..burst].iter().any(|v| v.abs() > 0.5), "burst {i} missing");
+            assert!(chunk[burst + 1..].iter().all(|&v| v == 0.0), "sound outside burst {i}");
+            for (a, b) in chunk[..burst].iter().zip(&samples[..burst]) {
+                assert!((a - b).abs() < 1e-3, "burst {i} differs from the first");
+            }
+            bursts += 1;
+        }
+        assert_eq!(bursts, 40);
     }
 }

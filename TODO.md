@@ -25,15 +25,12 @@ A primary goal is to support piezoelectric transducers for ultrasonic audio rese
 
 **Pull requests for piezo transducer integration are highly encouraged!**
 
-## True 40 Hz Auditory Stimulation (Planned)
+## True 40 Hz Auditory Stimulation
 
-The 40 Hz preset is a binaural beat, but the 40 Hz studies used pulsed sound, not binaural beats (see `CITATIONS.md`, entries 22 and 30 to 34). Add a pulsed mode that reproduces the published stimulus:
+Done: the ping layer has a `GammaPulse` type, and the "Gamma 40 Hz Pulses" preset reproduces the Martorell et al. 2019 stimulus (1 ms tones at 10 kHz, 40 per second, both ears). Still open:
 
-- **Martorell et al. 2019 (Cell)**: trains of 1 ms tones at 10 kHz, one every 25 ms (40 per second), from the paper's methods. Secondary sources give the level as 60 dB; check the STAR Methods before quoting it.
-- **Chan et al. 2022 (PLOS ONE)**: 40 Hz click sound paired with 40 Hz light (described in secondary sources; check the paper's methods).
-- Same signal in both ears (it is not a binaural effect), so it works on speakers as well as headphones.
-- Implementation sketch: a new layer or `SignalType` generating a tone burst of N cycles at a carrier, repeated at a rate (defaults 10 kHz, 1 ms, 40 Hz), with an option for a short raised-cosine ramp instead of a hard gate. Sample-accurate timing from a sample counter, no allocation in the callback.
-- Preset text must stay honest: the evidence is from mice and from light-and-sound devices, and Cognito's HOPE trial missed its primary endpoint.
+- Check the listening level used in Martorell 2019 (secondary sources say 60 dB) and Chan et al. 2022 (40 Hz clicks) against the papers' methods, then add both to the preset text if confirmed.
+- Optional soft (raised-cosine) edges for the bursts, as a comfort setting.
 
 ## Network Streaming (Improvements)
 

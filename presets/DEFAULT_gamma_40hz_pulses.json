@@ -1,0 +1,10 @@
+{
+  "preset_title": "Gamma 40 Hz Pulses (Martorell 2019 stimulus)",
+  "preset_description": "EXPERIMENTAL. Reproduces the auditory stimulus of Martorell et al. (2019, Cell): 1 ms tones at 10 kHz, repeated 40 times per second. Unlike the 40 Hz binaural beat preset, this is the pulsed sound the 40 Hz studies actually used, and it is the same in both ears, so speakers work as well as headphones. Evidence: in mice, 7 days of this stimulation improved memory tasks and reduced amyloid (Martorell et al. 2019); human 40 Hz trials used combined light and sound devices, and the large HOPE trial of such a device missed its primary endpoint (2026). No benefit in people has been shown for sound alone. Keep the volume low: the pulses are sharp and 10 kHz is in the ear's sensitive range. Stop if you feel discomfort or ringing. The ping frequency and volume can be adjusted; press o on the ping channel to switch back to a steady tone.",
+  "experimental": true,
+  "lock_signal_layer": false,
+  "master_vol": 0.15,
+  "ping_vol": 0.3,
+  "ping_type": "GammaPulse",
+  "ping_freq_hz": 10000.0
+}
