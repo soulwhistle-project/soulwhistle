@@ -1042,17 +1042,38 @@ fn initialize_presets() -> std::io::Result<()> {
     // Create presets directory if it doesn't exist
     std::fs::create_dir_all(&presets_dir)?;
 
-    // Copy embedded presets to user directory if they don't exist
+    // Install or refresh the built-in presets in the user directory
     for preset in embedded_presets::EMBEDDED_PRESETS {
-        let preset_path = presets_dir.join(preset.filename);
-
-        // Only copy if the file doesn't already exist (user may have modified it)
-        if !preset_path.exists() {
-            std::fs::write(&preset_path, preset.content)?;
-        }
+        sync_builtin_preset(&presets_dir, preset.filename, preset.content)?;
     }
 
     Ok(())
+}
+
+/// Install a built-in (`DEFAULT_`) preset, or refresh it when this version of the
+/// app ships different content (corrected text, retuned values). Saving from the UI
+/// never writes to `DEFAULT_` files, so a differing copy is an older release's
+/// version or a hand edit; either way the old copy is kept next to it as
+/// `<name>.bak-<unix time>`, which the preset list ignores (it only lists `.json`).
+/// Returns true when a file was written.
+fn sync_builtin_preset(dir: &std::path::Path, filename: &str, content: &str) -> std::io::Result<bool> {
+    let path = dir.join(filename);
+    match std::fs::read_to_string(&path) {
+        Ok(existing) if existing == content => Ok(false),
+        Ok(_) => {
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            std::fs::rename(&path, dir.join(format!("{}.bak-{}", filename, ts)))?;
+            std::fs::write(&path, content)?;
+            Ok(true)
+        }
+        Err(_) => {
+            std::fs::write(&path, content)?;
+            Ok(true)
+        }
+    }
 }
 
 /// Load preset from user directory or embedded fallback
@@ -2006,6 +2027,35 @@ fn draw_mixer(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
         .highlight_symbol(">> ");
 
     f.render_stateful_widget(list, list_area, &mut app.state);
+}
+
+#[cfg(test)]
+mod preset_sync_tests {
+    use super::*;
+
+    #[test]
+    fn builtin_presets_are_installed_refreshed_and_backed_up() {
+        let dir = std::env::temp_dir().join(format!("soulwhistle-presets-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let name = "DEFAULT_test.json";
+
+        // Fresh install.
+        assert!(sync_builtin_preset(&dir, name, "v1").unwrap());
+        // Same content: untouched.
+        assert!(!sync_builtin_preset(&dir, name, "v1").unwrap());
+        // New release: refreshed, old copy kept as a non-.json backup.
+        assert!(sync_builtin_preset(&dir, name, "v2").unwrap());
+        assert_eq!(std::fs::read_to_string(dir.join(name)).unwrap(), "v2");
+        let backups: Vec<String> = std::fs::read_dir(&dir).unwrap()
+            .filter_map(|e| e.ok()?.file_name().into_string().ok())
+            .filter(|n| n.starts_with("DEFAULT_test.json.bak-"))
+            .collect();
+        assert_eq!(backups.len(), 1);
+        assert_eq!(std::fs::read_to_string(dir.join(&backups[0])).unwrap(), "v1");
+        assert!(!backups[0].ends_with(".json"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[cfg(test)]
