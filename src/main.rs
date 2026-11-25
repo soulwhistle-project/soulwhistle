@@ -180,6 +180,7 @@ struct App {
 
     // Network streaming
     stream_client_count: Arc<Mutex<usize>>,
+    stream_host: String, // This machine's LAN address, shown in the stream URLs
 
     // Collapsible sections
     signal_layer_collapsed: bool,
@@ -294,6 +295,7 @@ impl App {
             preset_state,
             current_preset: None,
             stream_client_count,
+            stream_host: local_ip(),
             recording,
             sample_rate: 0.0,
         }
@@ -549,6 +551,10 @@ impl App {
                      }
                      ChannelId::StreamEnable => {
                          params.stream_enabled = !params.stream_enabled;
+                         if params.stream_enabled {
+                             // The network may have changed since startup.
+                             self.stream_host = local_ip();
+                         }
                          return;
                      }
                      _ => {}
@@ -1056,6 +1062,17 @@ fn initialize_presets() -> std::io::Result<()> {
 }
 
 /// Unix time in seconds, for backup file names.
+/// This machine's address on the local network, for the stream URLs. A UDP socket
+/// "connected" to a reserved documentation address (192.0.2.1, TEST-NET-1) sends
+/// nothing: connect() only asks the OS which local address it would route from.
+fn local_ip() -> String {
+    std::net::UdpSocket::bind("0.0.0.0:0")
+        .and_then(|s| s.connect("192.0.2.1:9").map(|_| s))
+        .and_then(|s| s.local_addr())
+        .map(|a| a.ip().to_string())
+        .unwrap_or_else(|_| "<ip>".to_string())
+}
+
 fn unix_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -2000,8 +2017,9 @@ fn draw_mixer(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                     format!("{:<40} {} {}{}", chan.name, state, detection, clients_info)
                 },
                 ChannelId::StreamPort => {
-                    format!("{:<40} {} (http://<ip>:{}/stream.wav)",
-                        chan.name, params.stream_port, params.stream_port)
+                    let base = format!("http://{}:{}", app.stream_host, params.stream_port);
+                    format!("{:<40} {} ({base}/stream.flac or {base}/stream.wav)",
+                        chan.name, params.stream_port)
                 },
                 _ => {
                     let (vol, mod_type) = match chan.id {

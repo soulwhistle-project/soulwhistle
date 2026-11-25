@@ -180,14 +180,15 @@ impl StreamingServer {
                 None => (url.clone(), String::new()),
             };
 
-            // Accept /stream.wav or just /
-            let is_valid_path = path == "/stream.wav" || path == "/";
+            // Accept /stream.wav, /stream.flac or just /
+            let is_valid_path = path == "/stream.wav" || path == "/stream.flac" || path == "/";
+            let default_format = if path == "/stream.flac" { StreamFormat::Flac24 } else { StreamFormat::S16 };
 
-            let format = match StreamFormat::from_query(&query) {
+            let format = match StreamFormat::from_query(&query, default_format) {
                 Ok(f) => f,
                 Err(bad) => {
                     let response = tiny_http::Response::from_string(format!(
-                        "Unknown format '{}'. Use ?fmt=s16 (default), s24 or f32.\n", bad))
+                        "Unknown format '{}'. Use ?fmt=s16 (default), s24, f32, flac (24-bit) or flac16.\n", bad))
                         .with_status_code(400);
                     let _ = request.respond(response);
                     continue;
@@ -198,6 +199,8 @@ impl StreamingServer {
                 // Clone necessary data for the thread
                 let buffer = self.buffer.clone();
                 let client_count = self.client_count.clone();
+                let title = self.params.lock().preset_title.clone()
+                    .unwrap_or_else(|| "Soulwhistle".to_string());
 
                 // Increment client count
                 {
@@ -207,7 +210,7 @@ impl StreamingServer {
 
                 // Spawn thread to handle this client
                 std::thread::spawn(move || {
-                    if let Err(e) = handle_stream_request(request, buffer.clone(), format) {
+                    if let Err(e) = handle_stream_request(request, buffer.clone(), format, &title) {
                         eprintln!("Stream error: {}", e);
                     }
 
@@ -240,20 +243,25 @@ fn handle_stream_request(
     request: tiny_http::Request,
     buffer: Arc<AudioRingBuffer>,
     format: StreamFormat,
+    title: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let sample_rate = buffer.sample_rate();
 
-    // Create WAV header for infinite stream
-    let wav_header = create_wav_header(sample_rate, format);
+    // Header for an endless stream
+    let (header, content_type) = if format.is_flac() {
+        (create_flac_header(sample_rate, format, title)?, &b"audio/flac"[..])
+    } else {
+        (create_wav_header(sample_rate, format), &b"audio/wav"[..])
+    };
 
     // Create a streaming reader, starting near live
-    let stream_reader = AudioStreamReader::new(buffer, Some(wav_header), format);
-    
+    let stream_reader = AudioStreamReader::new(buffer, Some(header), format);
+
     // Create response
     let response = tiny_http::Response::new(
         tiny_http::StatusCode(200),
         vec![
-            tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"audio/wav"[..]).unwrap(),
+            tiny_http::Header::from_bytes(&b"Content-Type"[..], content_type).unwrap(),
             tiny_http::Header::from_bytes(&b"Cache-Control"[..], &b"no-cache"[..]).unwrap(),
         ],
         stream_reader,
@@ -275,31 +283,106 @@ pub enum StreamFormat {
     S24,
     /// 32-bit IEEE float: bit-exact copy of the synth output. VLC, mpv, ffplay, Chrome.
     F32,
+    /// FLAC, 16-bit with TPDF dither: lossless at roughly half the WAV bandwidth.
+    Flac16,
+    /// FLAC, 24-bit with TPDF dither. Default for `/stream.flac`.
+    Flac24,
 }
 
 impl StreamFormat {
     /// Parse the `fmt` query parameter; `Err` carries the unrecognised value.
-    fn from_query(query: &str) -> Result<Self, String> {
+    fn from_query(query: &str, default: Self) -> Result<Self, String> {
         for pair in query.split('&') {
             if let Some(v) = pair.strip_prefix("fmt=") {
                 return match v.to_ascii_lowercase().as_str() {
                     "s16" | "16" => Ok(Self::S16),
                     "s24" | "24" => Ok(Self::S24),
                     "f32" | "float" => Ok(Self::F32),
+                    "flac" | "flac24" => Ok(Self::Flac24),
+                    "flac16" => Ok(Self::Flac16),
                     _ => Err(v.to_string()),
                 };
             }
         }
-        Ok(Self::S16)
+        Ok(default)
     }
 
+    fn is_flac(self) -> bool {
+        matches!(self, Self::Flac16 | Self::Flac24)
+    }
+
+    /// Bytes per sample in the WAV formats; bit depth / 8 for FLAC.
     fn bytes_per_sample(self) -> u16 {
         match self {
-            Self::S16 => 2,
-            Self::S24 => 3,
+            Self::S16 | Self::Flac16 => 2,
+            Self::S24 | Self::Flac24 => 3,
             Self::F32 => 4,
         }
     }
+}
+
+/// Per-listener FLAC encoder state. Encoding runs on the listener's HTTP thread,
+/// never in the audio callback.
+struct FlacEncoder {
+    config: flacenc::error::Verified<flacenc::config::Encoder>,
+    info: flacenc::component::StreamInfo,
+    framebuf: flacenc::source::FrameBuf,
+    block: Vec<i32>, // Interleaved L/R samples for the block being filled
+    frame_number: usize,
+}
+
+impl FlacEncoder {
+    fn new(sample_rate: u32, bits: usize) -> std::io::Result<Self> {
+        use flacenc::error::Verify;
+        let err = |e: String| std::io::Error::new(std::io::ErrorKind::Other, e);
+        let config = flacenc::config::Encoder::default()
+            .into_verified()
+            .map_err(|(_, e)| err(format!("FLAC config: {e:?}")))?;
+        let info = flac_stream_info(sample_rate, bits)?;
+        let framebuf = flacenc::source::FrameBuf::with_size(2, FLAC_BLOCK_SIZE)
+            .map_err(|e| err(format!("FLAC buffer: {e:?}")))?;
+        Ok(Self {
+            config,
+            info,
+            framebuf,
+            block: Vec::with_capacity(FLAC_BLOCK_SIZE * 2),
+            frame_number: 0,
+        })
+    }
+
+    /// Encode the full block into `out` as one FLAC frame.
+    fn encode_block(&mut self, out: &mut Vec<u8>) -> std::io::Result<()> {
+        use flacenc::component::BitRepr;
+        use flacenc::source::Fill;
+        let err = |e: String| std::io::Error::new(std::io::ErrorKind::Other, e);
+        self.framebuf
+            .fill_interleaved(&self.block)
+            .map_err(|e| err(format!("FLAC fill: {e:?}")))?;
+        let frame = flacenc::encode_fixed_size_frame(&self.config, &self.framebuf, self.frame_number, &self.info)
+            .map_err(|e| err(format!("FLAC encode: {e:?}")))?;
+        let mut sink = flacenc::bitsink::ByteSink::new();
+        frame.write(&mut sink).map_err(|e| err(format!("FLAC write: {e:?}")))?;
+        out.extend_from_slice(sink.as_slice());
+        self.frame_number += 1;
+        self.block.clear();
+        Ok(())
+    }
+}
+
+/// STREAMINFO for an endless stereo stream with fixed-size blocks.
+fn flac_stream_info(sample_rate: u32, bits: usize) -> std::io::Result<flacenc::component::StreamInfo> {
+    let err = |e: String| std::io::Error::new(std::io::ErrorKind::Other, e);
+    let mut info = flacenc::component::StreamInfo::new(sample_rate as usize, 2, bits)
+        .map_err(|e| err(format!("FLAC stream info: {e:?}")))?;
+    info.set_block_sizes(FLAC_BLOCK_SIZE, FLAC_BLOCK_SIZE)
+        .map_err(|e| err(format!("FLAC block size: {e:?}")))?;
+    // Frame sizes 0 = unknown. flacenc's defaults (min 0xFFFFFF, max 0) are
+    // placeholders a file encoder overwrites at the end; sent live, VLC took the
+    // 16 MB "minimum frame size" literally and never output a frame.
+    info.set_frame_sizes(0, 0)
+        .map_err(|e| err(format!("FLAC frame size: {e:?}")))?;
+    // total_samples stays 0 (unknown: endless stream); MD5 stays zero (not checked).
+    Ok(info)
 }
 
 /// Custom reader that streams audio data
@@ -312,6 +395,9 @@ struct AudioStreamReader {
     format: StreamFormat,
     dither_state: u32,   // xorshift32 state for TPDF dither
     lead: u64,           // Samples behind live to (re)start at
+    flac: Option<FlacEncoder>,
+    pending: Vec<u8>,    // Encoded bytes not yet handed to the HTTP writer
+    pending_pos: usize,
 }
 
 impl AudioStreamReader {
@@ -319,6 +405,11 @@ impl AudioStreamReader {
         let lead = buffer.sample_rate() as u64 * STREAM_START_LEAD_MS / 1000;
         let position = buffer.live_position(lead);
         let epoch = buffer.get_epoch();
+        let flac = if format.is_flac() {
+            FlacEncoder::new(buffer.sample_rate(), 8 * format.bytes_per_sample() as usize).ok()
+        } else {
+            None
+        };
         Self {
             buffer,
             position,
@@ -328,7 +419,56 @@ impl AudioStreamReader {
             format,
             dither_state: 0x9E37_79B9,
             lead,
+            flac,
+            pending: Vec::new(),
+            pending_pos: 0,
         }
+    }
+
+    /// Block until up to `max` new samples are available. Never returns empty:
+    /// returning Ok(0) from `read` would make players treat the stream as ended.
+    fn next_samples(&mut self, max: usize) -> Vec<(f32, f32)> {
+        loop {
+            // Preset changed: the buffer was flushed. Jump to the new preset's audio
+            // (the usual lead behind live, clamped to the first sample after the
+            // flush) and keep the connection open: closing it made VLC and browsers
+            // stop playing.
+            let epoch = self.buffer.get_epoch();
+            if epoch != self.epoch {
+                self.epoch = epoch;
+                self.position = self.buffer.live_position(self.lead);
+            }
+
+            let samples = self.buffer.read_samples(&mut self.position, max);
+            if !samples.is_empty() {
+                return samples;
+            }
+
+            // No data yet (buffer underrun) — wait briefly, then retry.
+            std::thread::sleep(Duration::from_millis(STREAM_READ_WAIT_MS));
+        }
+    }
+
+    /// Fill one FLAC block from the ring buffer and encode it into `pending`.
+    fn fill_flac_frame(&mut self) -> std::io::Result<()> {
+        let mut enc = self.flac.take().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::Other, "FLAC encoder unavailable")
+        })?;
+        let full_scale = if self.format == StreamFormat::Flac16 { PCM_I16_MAX } else { PCM_I24_MAX };
+        while enc.block.len() < FLAC_BLOCK_SIZE * 2 {
+            let want = FLAC_BLOCK_SIZE - enc.block.len() / 2;
+            for (l, r) in self.next_samples(want) {
+                let li = self.quantise(l, full_scale);
+                let ri = self.quantise(r, full_scale);
+                enc.block.push(li);
+                enc.block.push(ri);
+            }
+        }
+        self.pending.clear();
+        self.pending_pos = 0;
+        let result = enc.encode_block(&mut self.pending);
+        self.flac = Some(enc);
+        result
     }
 
     /// Triangular (TPDF) dither in LSBs: sum of two uniform values, range (-1, 1).
@@ -369,8 +509,20 @@ impl std::io::Read for AudioStreamReader {
             return Ok(len);
         }
 
-        // Only read as many samples as fit in `buf` (4 bytes per stereo frame), so the
-        // whole PCM batch is always flushed — never truncated and lost.
+        // FLAC: hand out the current encoded frame, encoding the next when empty.
+        if self.format.is_flac() {
+            if self.pending_pos >= self.pending.len() {
+                self.fill_flac_frame()?;
+            }
+            let rest = &self.pending[self.pending_pos..];
+            let len = rest.len().min(buf.len());
+            buf[..len].copy_from_slice(&rest[..len]);
+            self.pending_pos += len;
+            return Ok(len);
+        }
+
+        // Only read as many samples as fit in `buf`, so the whole PCM batch is
+        // always flushed, never truncated and lost.
         let frame_bytes = 2 * self.format.bytes_per_sample() as usize;
         let max_samples = (buf.len() / frame_bytes).min(STREAM_READ_CHUNK_SIZE);
         if max_samples == 0 {
@@ -378,27 +530,7 @@ impl std::io::Read for AudioStreamReader {
             return Ok(0);
         }
 
-        // Block until data is available, retrying on transient underrun. Never
-        // return Ok(0) here: players treat it as end of stream and stop.
-        let samples = loop {
-            // Preset changed: the buffer was flushed. Jump to the new preset's audio
-            // (the usual lead behind live, clamped to the first sample after the
-            // flush) and keep the connection open: closing it made VLC and browsers
-            // stop playing.
-            let epoch = self.buffer.get_epoch();
-            if epoch != self.epoch {
-                self.epoch = epoch;
-                self.position = self.buffer.live_position(self.lead);
-            }
-
-            let samples = self.buffer.read_samples(&mut self.position, max_samples);
-            if !samples.is_empty() {
-                break samples;
-            }
-
-            // No data yet (buffer underrun) — wait briefly, then retry.
-            std::thread::sleep(Duration::from_millis(STREAM_READ_WAIT_MS));
-        };
+        let samples = self.next_samples(max_samples);
 
         // Reuse the PCM buffer (clear but keep capacity)
         let mut pcm = std::mem::take(&mut self.pcm_buffer);
@@ -419,6 +551,7 @@ impl std::io::Read for AudioStreamReader {
                     StreamFormat::F32 => {
                         pcm.extend_from_slice(&x.clamp(AUDIO_CLAMP_MIN, AUDIO_CLAMP_MAX).to_le_bytes());
                     }
+                    StreamFormat::Flac16 | StreamFormat::Flac24 => unreachable!("handled above"),
                 }
             }
         }
@@ -430,6 +563,43 @@ impl std::io::Read for AudioStreamReader {
 
         Ok(len)
     }
+}
+
+/// `fLaC` marker, STREAMINFO for an endless stream, and a Vorbis comment block
+/// carrying the preset title (shown by players as the track title); FLAC frames
+/// follow. Players read tags once, when they connect.
+fn create_flac_header(sample_rate: u32, format: StreamFormat, title: &str) -> std::io::Result<Vec<u8>> {
+    use flacenc::component::BitRepr;
+    let info = flac_stream_info(sample_rate, 8 * format.bytes_per_sample() as usize)?;
+    let mut stream = flacenc::component::Stream::with_stream_info(info);
+    stream.add_metadata_block(flacenc::component::MetadataBlockData::new_unknown(
+        FLAC_VORBIS_COMMENT_TYPE,
+        &vorbis_comment(&[("TITLE", title), ("ARTIST", "Soulwhistle")]),
+    ).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("FLAC tags: {e:?}")))?);
+    let mut sink = flacenc::bitsink::ByteSink::new();
+    stream.write(&mut sink).map_err(|e| {
+        std::io::Error::new(std::io::ErrorKind::Other, format!("FLAC header: {e:?}"))
+    })?;
+    Ok(sink.as_slice().to_vec())
+}
+
+/// FLAC metadata block type 4: VORBIS_COMMENT.
+const FLAC_VORBIS_COMMENT_TYPE: u8 = 4;
+
+/// Vorbis comment block body: vendor string, then `KEY=value` pairs, all with
+/// 32-bit little-endian lengths (the one little-endian structure in FLAC).
+fn vorbis_comment(tags: &[(&str, &str)]) -> Vec<u8> {
+    let vendor = concat!("soulwhistle ", env!("CARGO_PKG_VERSION"));
+    let mut out = Vec::new();
+    out.extend_from_slice(&(vendor.len() as u32).to_le_bytes());
+    out.extend_from_slice(vendor.as_bytes());
+    out.extend_from_slice(&(tags.len() as u32).to_le_bytes());
+    for (key, value) in tags {
+        let entry = format!("{key}={value}");
+        out.extend_from_slice(&(entry.len() as u32).to_le_bytes());
+        out.extend_from_slice(entry.as_bytes());
+    }
+    out
 }
 
 /// Create a WAV file header for an endless stream in the given format.
@@ -480,12 +650,90 @@ mod tests {
         b
     }
 
+    /// Encode about 0.4 s of a known signal through the FLAC stream path and, when the
+    /// reference `flac` tool is installed, decode it and compare every sample.
+    #[test]
+    fn flac_stream_decodes_to_the_same_samples() {
+        for (fmt, full_scale) in [(StreamFormat::Flac24, PCM_I24_MAX), (StreamFormat::Flac16, PCM_I16_MAX)] {
+            let fs = 48000u32;
+            let frames = FLAC_BLOCK_SIZE * 5;
+            let b = Arc::new(AudioRingBuffer::new(fs, 2000));
+            let src: Vec<(f32, f32)> = (0..frames)
+                .map(|i| {
+                    let t = i as f32 / fs as f32;
+                    (0.5 * (2.0 * std::f32::consts::PI * 400.0 * t).sin(),
+                     0.5 * (2.0 * std::f32::consts::PI * 410.0 * t).sin())
+                })
+                .collect();
+            b.push_samples_batch(&src);
+
+            let header = create_flac_header(fs, fmt, "Test preset").unwrap();
+            assert_eq!(&header[..4], b"fLaC");
+            // STREAMINFO: block sizes fixed, frame sizes 0 (unknown). A non-zero
+            // minimum frame size stalls VLC on a live stream.
+            assert_eq!(&header[8..12], &[0x10, 0x00, 0x10, 0x00], "block sizes");
+            assert_eq!(&header[12..18], &[0u8; 6], "frame sizes must be 0 (unknown)");
+            let mut r = AudioStreamReader::new(b, Some(header), fmt);
+            r.position = 0; // start at the first sample for the comparison
+            let mut bytes = Vec::new();
+            let mut buf = [0u8; 8192];
+            // Header, then the first 4 full blocks (the 5th would block for more audio).
+            while r.flac.as_ref().map_or(0, |e| e.frame_number) < 4 || r.pending_pos < r.pending.len() {
+                let n = r.read(&mut buf).unwrap();
+                bytes.extend_from_slice(&buf[..n]);
+            }
+
+            let dir = std::env::temp_dir().join(format!("soulwhistle-flac-{}-{:?}", std::process::id(), fmt));
+            std::fs::create_dir_all(&dir).unwrap();
+            let flac_path = dir.join("stream.flac");
+            let wav_path = dir.join("decoded.wav");
+            std::fs::write(&flac_path, &bytes).unwrap();
+            let decoded = std::process::Command::new("flac")
+                .args(["-d", "-f", "-s", "-o"]).arg(&wav_path).arg(&flac_path)
+                .status();
+            match decoded {
+                Ok(st) if st.success() => {}
+                Ok(st) => panic!("{fmt:?}: flac could not decode the stream ({st})"),
+                Err(_) => {
+                    eprintln!("flac tool not installed: decode check skipped");
+                    let _ = std::fs::remove_dir_all(&dir);
+                    return;
+                }
+            }
+            let tags = std::process::Command::new("metaflac")
+                .args(["--show-tag=TITLE", "--show-tag=ARTIST"]).arg(&flac_path)
+                .output();
+            if let Ok(out) = tags {
+                let text = String::from_utf8_lossy(&out.stdout);
+                assert!(text.contains("TITLE=Test preset"), "{fmt:?} tags: {text}");
+                assert!(text.contains("ARTIST=Soulwhistle"), "{fmt:?} tags: {text}");
+            }
+            let wav = std::fs::read(&wav_path).unwrap();
+            let data = &wav[wav.len() - FLAC_BLOCK_SIZE * 4 * 2 * fmt.bytes_per_sample() as usize..];
+            let bps = fmt.bytes_per_sample() as usize;
+            for (i, frame) in data.chunks(2 * bps).enumerate() {
+                let dec = |c: &[u8]| -> f32 {
+                    let v = if bps == 2 { i16::from_le_bytes([c[0], c[1]]) as i32 }
+                            else { i32::from_le_bytes([0, c[0], c[1], c[2]]) >> 8 };
+                    v as f32 / full_scale
+                };
+                let tol = 2.0 / full_scale;
+                assert!((dec(&frame[..bps]) - src[i].0).abs() <= tol, "{fmt:?} left sample {i}");
+                assert!((dec(&frame[bps..]) - src[i].1).abs() <= tol, "{fmt:?} right sample {i}");
+            }
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
     #[test]
     fn query_selects_format() {
-        assert_eq!(StreamFormat::from_query(""), Ok(StreamFormat::S16));
-        assert_eq!(StreamFormat::from_query("fmt=f32"), Ok(StreamFormat::F32));
-        assert_eq!(StreamFormat::from_query("x=1&fmt=S24"), Ok(StreamFormat::S24));
-        assert!(StreamFormat::from_query("fmt=mp3").is_err());
+        assert_eq!(StreamFormat::from_query("", StreamFormat::S16), Ok(StreamFormat::S16));
+        assert_eq!(StreamFormat::from_query("fmt=f32", StreamFormat::S16), Ok(StreamFormat::F32));
+        assert_eq!(StreamFormat::from_query("x=1&fmt=S24", StreamFormat::S16), Ok(StreamFormat::S24));
+        assert!(StreamFormat::from_query("fmt=mp3", StreamFormat::S16).is_err());
+        assert_eq!(StreamFormat::from_query("fmt=flac", StreamFormat::S16), Ok(StreamFormat::Flac24));
+        assert_eq!(StreamFormat::from_query("fmt=flac16", StreamFormat::S16), Ok(StreamFormat::Flac16));
+        assert_eq!(StreamFormat::from_query("", StreamFormat::Flac24), Ok(StreamFormat::Flac24));
     }
 
     #[test]
@@ -548,12 +796,14 @@ mod tests {
                     StreamFormat::S16 => i16::from_le_bytes([c[0], c[1]]) as f32 / PCM_I16_MAX,
                     StreamFormat::S24 => (i32::from_le_bytes([0, c[0], c[1], c[2]]) >> 8) as f32 / PCM_I24_MAX,
                     StreamFormat::F32 => f32::from_le_bytes(c.try_into().unwrap()),
+                    StreamFormat::Flac16 | StreamFormat::Flac24 => unreachable!(),
                 }
             };
             let tol = match fmt {
                 StreamFormat::S16 => 2.0 / PCM_I16_MAX,
                 StreamFormat::S24 => 2.0 / PCM_I24_MAX,
                 StreamFormat::F32 => 0.0,
+                StreamFormat::Flac16 | StreamFormat::Flac24 => unreachable!(),
             };
             for frame in buf[..n].chunks(2 * bps) {
                 assert!((decode(&frame[..bps]) - vals[0].0).abs() <= tol, "{fmt:?} left");

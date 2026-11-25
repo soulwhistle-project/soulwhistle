@@ -196,8 +196,10 @@ Add `?fmt=` to the URL:
 | `/stream.wav` | 16-bit PCM with TPDF dither (default) | Every player and browser |
 | `/stream.wav?fmt=s24` | 24-bit PCM with TPDF dither | VLC, mpv, ffplay, Chrome |
 | `/stream.wav?fmt=f32` | 32-bit float, bit-exact copy of the synth output | VLC, mpv, ffplay, Chrome |
+| `/stream.flac` | FLAC, 24-bit with TPDF dither, about half the bandwidth of WAV | mpv, ffplay, VLC on Android (tested); browsers not yet tested |
+| `/stream.flac?fmt=flac16` | FLAC, 16-bit with TPDF dither | mpv, ffplay, VLC on Android (tested); browsers not yet tested |
 
-All formats are lossless, stereo and at the output device's native sample rate. Lossy codecs (MP3, AAC, Opus, Bluetooth) are deliberately not offered: they cut content above about 20 kHz and blur the small left/right differences binaural beats rely on.
+All formats are lossless, stereo and at the output device's native sample rate. FLAC is encoded on each listener's own thread, never in the audio thread, in blocks of 4096 samples, which adds about 85 ms of latency at 48 kHz. FLAC carries integers only, so there is no float FLAC. The FLAC stream is tagged with the preset title, which players show when they connect; after a preset change the audio switches at once, but the title only updates when the player reconnects. Lossy codecs (MP3, AAC, Opus, Bluetooth) are deliberately not offered: they cut content above about 20 kHz and blur the small left/right differences binaural beats rely on.
 
 ### How the stream behaves
 

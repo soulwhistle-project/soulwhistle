@@ -211,6 +211,10 @@ pub const STREAM_READ_WAIT_MS: u64 = 5;
 /// scheduling jitter; the full 2 s buffer used to be replayed as latency.
 pub const STREAM_START_LEAD_MS: u64 = 200;
 
+/// Samples per channel in each FLAC frame of the network stream (about 85 ms at
+/// 48 kHz). Larger blocks compress better but add that much latency.
+pub const FLAC_BLOCK_SIZE: usize = 4096;
+
 /// Streaming server accept poll timeout (ms) — bounds shutdown latency when
 /// streaming is toggled off or the port changes
 pub const STREAM_ACCEPT_TIMEOUT_MS: u64 = 500;

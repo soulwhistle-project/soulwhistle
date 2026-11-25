@@ -28,6 +28,7 @@ anyhow = "1.0.100"
 cpal = "0.17.0"
 crossterm = "0.29.0"
 directories = "5.0"
+flacenc = { version = "0.5.1", default-features = false }
 num-complex = "0.4.6"
 parking_lot = "0.12.5"
 rand = "0.9.2"

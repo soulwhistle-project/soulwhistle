@@ -34,7 +34,7 @@ Done: the ping layer has a `GammaPulse` type, and the "Gamma 40 Hz Pulses" prese
 
 ## Network Streaming (Improvements)
 
-- **FLAC endpoint** (`/stream.flac`): lossless at about half the bandwidth of WAV. The pure-Rust `flacenc` crate (0.5.1, Apache-2.0, builds on stable) encodes block by block with `encode_fixed_size_frame`, which fits a live stream: write the `fLaC` header and STREAMINFO with an unknown total length, then one frame per block (for example 4096 samples). Encode on the reader thread, never in the audio callback. FLAC carries integers only: 16 or 24 bit.
+- ✅ **FLAC endpoint** (`/stream.flac`, `?fmt=flac16`): done. Checked with the reference `flac` decoder (sample-exact test), ffprobe, mpv and VLC on Android. Still to check: desktop VLC, Chrome and Firefox. Possible next step: live title updates after a preset change (tags are only read on connect).
 - **Clock drift**: the laptop's and the listener's sound cards run at slightly different speeds, so over many hours a slower listener falls 2 s behind and skips ahead with a click. Fixing it needs adaptive resampling on the reader side.
 - **Sample rate choice**: ultrasonic layers only stream if the device runs at 96 or 192 kHz (see piezo section above).
 

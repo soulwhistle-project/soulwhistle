@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- FLAC network stream: `/stream.flac` (24-bit) and `?fmt=flac16`, lossless at about half the bandwidth of WAV, encoded per listener with the pure-Rust `flacenc` crate, tagged with the preset title
+- The streaming panel shows this machine's address and both stream links instead of `<ip>`
 - New "Gamma 40 Hz Pulses" preset and `GammaPulse` ping type: 1 ms tones at 10 kHz, 40 per second, as in Martorell et al. 2019
 - explore_all: carriers moved to 300/307.5 Hz so its 220 Hz harmonic and 432 Hz pad no longer beat against them; adjusting the beat keeps the preset's carrier
 - Deep Focus presets renamed to match their titles (`DEFAULT_deep_focus_adhd_alpha.json`, `DEFAULT_deep_focus_smr.json`); old copies are moved aside as `.bak`
