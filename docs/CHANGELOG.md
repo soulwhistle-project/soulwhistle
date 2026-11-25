@@ -1,6 +1,34 @@
 # Changelog
 
-## v0.3.0 - Dual-Path Architecture (2024-12-22)
+## v0.3.0 (2026-11-25)
+
+### Sound quality
+- Tinnitus notch rebuilt as an order-8 Chebyshev II band-stop: at least 30 dB of cut across the whole labelled width (the old notch reached 20 dB over about a third of it)
+- Square, saw and triangle waveforms are band-limited, so they no longer fold back into false audible tones
+- Breath layer "Pink noise" now uses a real pink filter
+- RF output keeps exact modulation frequencies (was 1.6% high at 48 kHz)
+- Binaural beat range extended to 50 Hz, so the 40 Hz preset can be adjusted without dropping to 30 Hz
+- The UI says when a ping is muted for being above the sound card's limit
+
+### Real-time engine and recording
+- The audio callback never allocates, blocks or writes to disk; WAV recording runs on its own thread
+- Quitting during a recording now finishes the WAV file correctly
+
+### Network streaming
+- Choose the quality in the URL: `?fmt=s16` (default, dithered), `s24` or `f32` (bit-exact)
+- Changing preset no longer disconnects listeners
+- New listeners start about 200 ms behind live instead of 2 s
+
+### Presets and citations
+- Corrected the 40 Hz, tinnitus and RF preset texts against the published evidence
+- Transmitting in 1400-1427 MHz (hydrogen line) is stated as prohibited worldwide (ITU RR 5.340)
+- CITATIONS.md: fixed the Blanco-Duque 2024 authors, toned down unsupported claims, added 14 checked studies
+- Built-in presets are refreshed on startup when a release changes them; the old copy is kept as a `.bak` file
+
+### Documentation
+- README key table fixed and new features documented; one-page overview in `docs/overview/`
+
+## Dual-Path Architecture (2024-12-22)
 
 ### Major Features
 
