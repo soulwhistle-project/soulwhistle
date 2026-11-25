@@ -94,9 +94,18 @@ impl CoherenceParams {
     pub fn apply_custom_binaural(&mut self, target_hz: f32) {
         self.custom_binaural_hz = target_hz.clamp(BEAT_MIN_HZ, BEAT_MAX_HZ);
 
-        // Use optimal carrier frequency, offset right channel
-        self.left_carrier = OPTIMAL_CARRIER_HZ;
-        self.right_carrier = OPTIMAL_CARRIER_HZ + self.custom_binaural_hz;
+        // Keep the preset's base carrier (the lower of the two) so its choice holds when
+        // the beat is adjusted: explore_all uses 300 Hz to stay clear of its 432 Hz pad,
+        // and resetting to 400 Hz would make the two beat against each other.
+        // Fall back to the optimal carrier when the current one is out of range.
+        let base = self.left_carrier.min(self.right_carrier);
+        let base = if (CUSTOM_CARRIER_MIN_HZ..=CUSTOM_CARRIER_MAX_HZ).contains(&base) {
+            base
+        } else {
+            OPTIMAL_CARRIER_HZ
+        };
+        self.left_carrier = base;
+        self.right_carrier = base + self.custom_binaural_hz;
 
         // Enable moderate harmonics for custom mode
         self.harmonic_220hz = target_hz < THETA_MAX_HZ; // Only for theta/delta
@@ -331,5 +340,31 @@ impl CoherenceSynth {
     /// Get current session information (for UI display)
     pub fn get_session_info(&self) -> (f32, SessionPhase) {
         (self.session_timer_secs(), self.current_phase)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adjusting_the_beat_keeps_the_preset_base_carrier() {
+        let mut c = CoherenceParams::default();
+        c.left_carrier = 300.0;
+        c.right_carrier = 307.5;
+        c.apply_custom_binaural(10.0);
+        assert_eq!((c.left_carrier, c.right_carrier), (300.0, 310.0));
+
+        // Base taken from the lower carrier whichever ear it is in.
+        c.left_carrier = 418.0;
+        c.right_carrier = 400.0;
+        c.apply_custom_binaural(14.0);
+        assert_eq!((c.left_carrier, c.right_carrier), (400.0, 414.0));
+
+        // Out-of-range carriers fall back to the optimal one.
+        c.left_carrier = 0.0;
+        c.right_carrier = 0.0;
+        c.apply_custom_binaural(10.0);
+        assert_eq!(c.left_carrier, OPTIMAL_CARRIER_HZ);
     }
 }

@@ -30,6 +30,11 @@ pub const HYDROGEN_LINE_HZ: u64 = 1_420_405_752;
 /// Optimal carrier frequency for binaural beats (center of 300-600 Hz range)
 pub const OPTIMAL_CARRIER_HZ: f32 = 400.0;
 
+/// Range in which a preset's own base carrier is kept when the beat is adjusted
+/// (binaural beats are heard best on carriers of a few hundred Hz; CITATIONS.md 30).
+pub const CUSTOM_CARRIER_MIN_HZ: f32 = 100.0;
+pub const CUSTOM_CARRIER_MAX_HZ: f32 = 1000.0;
+
 /// Harmonic frequency cluster (220 Hz)
 pub const HARMONIC_220_HZ: f32 = 220.0;
 

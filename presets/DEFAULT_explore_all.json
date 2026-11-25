@@ -20,8 +20,8 @@
   "coherence": {
     "enabled": true,
     "being_type": "HumanCustom",
-    "left_carrier": 200.0,
-    "right_carrier": 207.5,
+    "left_carrier": 300.0,
+    "right_carrier": 307.5,
     "custom_binaural_hz": 7.5,
     "harmonic_220hz": true,
     "harmonic_495hz": false,

@@ -2030,6 +2030,57 @@ fn draw_mixer(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
 }
 
 #[cfg(test)]
+mod preset_content_tests {
+    use super::*;
+    use crate::coherence::BeingType;
+
+    /// A tone added to both ears close to a binaural carrier beats against it inside
+    /// each ear (a physical, monaural beat), which swamps the intended binaural beat.
+    /// explore_all once had a 220 Hz harmonic over 200/207.5 Hz carriers: real 20 and
+    /// 12.5 Hz beats on top of the labelled 7.5 Hz one.
+    #[test]
+    fn harmonics_stay_clear_of_carriers() {
+        const MIN_SEPARATION_HZ: f32 = 50.0;
+        for preset in embedded_presets::EMBEDDED_PRESETS {
+            let params: AudioParams = serde_json::from_str(preset.content)
+                .unwrap_or_else(|e| panic!("{}: {e}", preset.filename));
+            let c = &params.coherence;
+            if !c.enabled {
+                continue;
+            }
+            let mut carriers = vec![c.left_carrier, c.right_carrier];
+            if c.being_type == BeingType::HumanFocus10 {
+                carriers.extend([GAMMA_CARRIER_HZ, GAMMA_CARRIER_HZ + GAMMA_BEAT_HZ]);
+            }
+            // Every other tone played into both ears: the coherence harmonics, and
+            // the signal layer's tonal channels when the layer is audible.
+            let signal_on = !params.lock_signal_layer;
+            let carrier_layer = match params.carrier_type {
+                SignalType::Schumann783AM => CARRIER_783_HZ,
+                _ => CARRIER_BASE_HZ,
+            };
+            let harmonics = [
+                (c.harmonic_220hz, HARMONIC_220_HZ),
+                (c.harmonic_495hz, HARMONIC_495_HZ),
+                (signal_on && params.harmonic_vol > 0.0, SOLFEGGIO_MI_HZ),
+                (signal_on && params.pad_vol > 0.0, VERDI_A_HZ),
+                (signal_on && params.carrier_vol > 0.0, carrier_layer),
+            ];
+            for (on, h) in harmonics {
+                if !on {
+                    continue;
+                }
+                for &carrier in &carriers {
+                    assert!((h - carrier).abs() >= MIN_SEPARATION_HZ,
+                        "{}: {h} Hz tone is only {:.1} Hz from the {carrier} Hz carrier",
+                        preset.filename, (h - carrier).abs());
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod preset_sync_tests {
     use super::*;
 
