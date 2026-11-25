@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Soulwhistle overview</title>
+<style>
+  @page { size: A4; margin: 14mm 17mm 9mm; background: #f7f4ee; }
+  :root {
+    --paper: #f7f4ee;
+    --ink: #1d1b18;
+    --muted: #6b655c;
+    --rule: #cfc8bc;
+    --accent: #b4532a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); }
+  body {
+    font-family: "Lato", sans-serif; font-size: 9.2pt; line-height: 1.4;
+  }
+  h1 {
+    font-family: "Linux Libertine O", "Linux Libertine", serif; font-weight: 400;
+    font-size: 38pt; line-height: 1; margin: 0 0 2mm; letter-spacing: -0.5pt;
+  }
+  h1 em { color: var(--accent); }
+  .sub {
+    font-family: "Linux Libertine O", serif; font-size: 15pt; line-height: 1.25;
+    margin: 0 0 4mm; max-width: 150mm;
+  }
+  .lead { max-width: 160mm; margin: 0 0 3mm; font-size: 10.2pt; }
+  figure {
+    margin: 0 0 4mm; padding: 3mm 0 2mm;
+    border-top: 1px solid var(--ink);
+  }
+  figure img { width: 72%; display: block; }
+  figcaption { color: var(--muted); font-size: 8.4pt; margin-top: 1mm; }
+  .cols { display: flex; gap: 9mm; }
+  .col { flex: 1; }
+  h2 {
+    font-family: "Linux Libertine O", serif; font-weight: 400; font-size: 14pt;
+    margin: 0 0 1.5mm; padding-top: 2mm; border-top: 1px solid var(--rule);
+  }
+  ul { margin: 0 0 3.5mm; padding-left: 0; list-style: none; }
+  li { margin: 0 0 1mm; padding-left: 3.4mm; text-indent: -3.4mm; }
+  li::before { content: "·"; color: var(--accent); font-weight: 700; padding-right: 2.2mm; }
+  p { margin: 0 0 5mm; }
+  code {
+    font-family: "Fira Code", monospace; font-size: 8.6pt;
+  }
+  .get {
+    display: flex; gap: 9mm; align-items: baseline;
+    border-top: 1px solid var(--ink); padding-top: 3mm; margin-top: 1mm;
+  }
+  .get div { flex: 1; }
+  .get strong { font-weight: 700; }
+  .small { color: var(--muted); font-size: 8.2pt; }
+</style>
+</head>
+<body>
+
+<h1>Soul<em>whistle</em></h1>
+<p class="sub">An open-source tone generator for brainwave entrainment and sound research, with exact frequencies you can share and repeat.</p>
+
+<p class="lead">Soulwhistle is a real-time synthesizer that runs in the terminal. It plays binaural beats and layered signals with precise, reproducible frequencies, and stores every session as a plain JSON preset, so anyone can rerun it, inspect it, or check the numbers.</p>
+
+<figure>
+  <img src="binaural-figure.svg" alt="Two slightly different tones, one per ear, and the slow beat they produce together">
+  <figcaption>How a binaural beat works: each ear hears a slightly different pure tone, and the difference (here 10&nbsp;Hz) is perceived as a slow pulse. Headphones required. Waves drawn scaled down for clarity.</figcaption>
+</figure>
+
+<div class="cols">
+  <div class="col">
+    <h2>What it plays</h2>
+    <ul>
+      <li>Binaural beats from 0.1 to 50&nbsp;Hz, covering delta, theta, alpha, beta and gamma</li>
+      <li>Extra layers: a 7.83&nbsp;Hz modulated carrier, 528 and 432&nbsp;Hz tones, chirps, breathing noise and an ultrasonic ping</li>
+      <li>Tinnitus notched noise, centred on the pitch you match by ear</li>
+      <li>Sessions in phases: start-up, induction, stabilisation and return</li>
+      <li>Optional radio output through a HackRF One, for licensed experiments</li>
+    </ul>
+
+    <h2>Presets included</h2>
+    <ul>
+      <li>Focus 10, 12, 15 and 21, from frequency analysis of Monroe Institute recordings</li>
+      <li>Deep focus at 10, 14 and 18&nbsp;Hz, and an experimental 40&nbsp;Hz gamma</li>
+      <li>Tinnitus notch therapy</li>
+      <li>Ultrasonic and exploratory presets, each clearly marked experimental</li>
+    </ul>
+  </div>
+
+  <div class="col">
+    <h2>Built for clean sound</h2>
+    <ul>
+      <li>The audio thread never waits, allocates memory or writes to disk, so playback does not glitch</li>
+      <li>Square, saw and triangle waves are band-limited: no false tones folding back into the audible range</li>
+      <li>The tinnitus notch cuts at least 30&nbsp;dB across its whole width</li>
+      <li>Runs at the sound card's own sample rate, and says so when a frequency is too high to play</li>
+    </ul>
+
+    <h2>Record and share</h2>
+    <ul>
+      <li>One key records the session to a WAV file</li>
+      <li>Lossless network stream in 16-bit, 24-bit or 32-bit float, to VLC, mpv or a browser</li>
+      <li>AirPlay speakers and multi-room audio through PipeWire and Snapcast</li>
+    </ul>
+
+    <h2>Honest about the evidence</h2>
+    <p>Research on binaural beats is mixed: meta-analyses report small to moderate effects on attention, memory and anxiety, while EEG studies disagree on whether the brain actually follows the beat. Soulwhistle is a research instrument, not a medical device. Research presets cite their sources, and exploratory ones are labelled experimental.</p>
+  </div>
+</div>
+
+<div class="get">
+  <div>
+    <strong>Install</strong><br>
+    <code>cargo install soulwhistle</code>
+  </div>
+  <div>
+    <strong>Source and citations</strong><br>
+    github.com/soulwhistle-project/soulwhistle
+  </div>
+  <div>
+    <strong>Contact</strong><br>
+    soulwhistle@pm.me
+  </div>
+</div>
+<p class="small" style="margin:2mm 0 0">Code under the Apache License 2.0. Presets and documentation under CC BY 4.0. Not intended to diagnose, treat or prevent any condition.</p>
+
+</body>
+</html>

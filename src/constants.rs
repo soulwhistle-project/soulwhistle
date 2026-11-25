@@ -194,6 +194,10 @@ pub const STREAM_READ_CHUNK_SIZE: usize = 1024;
 /// Streaming read wait time when buffer empty (ms)
 pub const STREAM_READ_WAIT_MS: u64 = 5;
 
+/// How far behind live a new stream listener starts (ms). Enough to absorb
+/// scheduling jitter; the full 2 s buffer used to be replayed as latency.
+pub const STREAM_START_LEAD_MS: u64 = 200;
+
 /// Streaming server accept poll timeout (ms) — bounds shutdown latency when
 /// streaming is toggled off or the port changes
 pub const STREAM_ACCEPT_TIMEOUT_MS: u64 = 500;
@@ -201,6 +205,7 @@ pub const STREAM_ACCEPT_TIMEOUT_MS: u64 = 500;
 /// WAV file format constants
 pub const WAV_INFINITE_SIZE: u32 = 0xFFFFFFFF;
 pub const WAV_PCM_FORMAT: u16 = 1;
+pub const WAV_IEEE_FLOAT_FORMAT: u16 = 3;
 pub const WAV_STEREO_CHANNELS: u16 = 2;
 pub const WAV_BITS_PER_SAMPLE: u16 = 16;
 pub const WAV_BYTES_PER_SAMPLE: u16 = 2;
@@ -236,6 +241,7 @@ pub const FM_MODULATION_RANGE_HZ: f32 = 20.0;
 // === Signal Clipping ===
 /// PCM i16 maximum value
 pub const PCM_I16_MAX: f32 = 32767.0;
+pub const PCM_I24_MAX: f32 = 8_388_607.0;
 
 /// Audio sample clamp range
 pub const AUDIO_CLAMP_MIN: f32 = -1.0;

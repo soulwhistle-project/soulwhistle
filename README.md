@@ -7,15 +7,22 @@ Soulwhistle is a real-time audio synthesis engine designed for researchers, prac
 ## Core Capabilities
 
 ### Audio Synthesis
-- **Binaural Beats**: Any frequency from 0.1 to 30 Hz (delta, theta, alpha, beta, gamma)
+- **Binaural Beats**: Any frequency from 0.1 to 50 Hz (delta, theta, alpha, beta, gamma)
 - **Custom Carriers**: Configurable carrier frequencies (optimal range: 300-600 Hz)
 - **Multi-Layer Mixing**: Schumann resonance (7.83 Hz), harmonics (528 Hz), ambient pads (432 Hz)
 - **Signal Types**: Sine, triangle, square, sawtooth, FM/AM modulation, organic chirps
+- **Clean Waveforms**: Square, saw and triangle are band-limited to the output's Nyquist limit, so they never fold back into false audible tones
 - **Session Phases**: Multi-phase sessions with independent beat frequencies per phase
+- **Tinnitus Notched Sound**: Pink or white noise with an octave-scaled notch centred on your matched tinnitus pitch
+
+### Real-Time Audio Engine
+- **Glitch-free by design**: the audio callback never allocates, blocks on a lock, or touches the disk
+- **Native sample rate**: synthesis runs at the output device's own rate; ultrasonic layers above its Nyquist limit are muted and flagged in the UI instead of aliasing
 
 ### Research Features
 - **Real-Time Control**: Live adjustment of frequencies, volumes, and waveforms via TUI
-- **Network Streaming**: HTTP audio streaming for wireless playback (experimental)
+- **WAV Recording**: Record any session to a 16-bit stereo WAV file (`r`)
+- **Network Streaming**: Lossless HTTP streaming (16-bit, 24-bit or 32-bit float) to VLC, mpv or a browser
 - **RF Transmission**: HackRF One integration for radio frequency experiments
 - **Preset System**: JSON-based presets for reproducible experiments
 
@@ -59,24 +66,28 @@ Presets are automatically installed to:
 
 ### Quick Start
 
-1. **Select a preset**: Use `p` key to browse included research presets
-2. **Adjust parameters**: Navigate with arrow keys, adjust with left/right arrows
-3. **Control playback**: Space to play/pause, `m` to toggle oscillator types
-4. **Lock signal layer**: `x` to lock/unlock core frequencies during experimentation
+1. **Select a preset**: Press `l` to browse the included research presets
+2. **Adjust parameters**: Navigate with the up/down arrows, adjust with left/right
+3. **Control playback**: Space to play/pause, `o` to cycle oscillator types, `m` to mute a channel
+4. **Record**: Press `r` to start and stop a WAV recording
 
 ### Basic Controls
 
 | Key | Action |
 |-----|--------|
-| `↑/↓` | Navigate channels |
-| `←/→` | Adjust values |
+| `↑/↓` or `k/j` | Navigate channels |
+| `←/→` or `h/l` | Adjust values |
 | `Space` | Play/pause |
 | `m` | Mute/unmute channel |
 | `o` | Cycle oscillator type |
-| `p` | Select preset |
-| `x` | Lock/unlock signal layer |
-| `c` | Collapse/expand sections |
-| `q` | Quit |
+| `l` | Load a preset |
+| `s` | Save current settings as a preset |
+| `r` | Start/stop WAV recording |
+| `t` | Match your tinnitus pitch (notch therapy) |
+| `x` | Collapse/expand sections |
+| `q` | Quit (an active recording is finalized first) |
+
+Recordings are saved as `rec_<timestamp>.wav` in a `recordings` folder next to the presets folder.
 
 ## Research Presets
 
@@ -94,6 +105,9 @@ These presets are based on independent FFT analysis of Monroe Institute techniqu
 - **Focus 12**: Expanded awareness state (theta with gamma bursts)
 - **Focus 15**: "No-time" state (deep theta)
 - **Focus 21**: Bridge state (complex multi-frequency)
+
+### Tinnitus
+- **Tinnitus Notch Therapy**: Pink or white noise with a notch centred on your tinnitus pitch, following tailor-made notched sound therapy (Okamoto et al. 2010). Press `t` to match your pitch by ear, then set the notch width (0.25 to 1 octave). The whole band is cut by at least 30 dB. Evidence from trials and meta-analyses is mixed, and no notch width has been shown to work better than another.
 
 ### Animal Research
 Ultrasonic and RF frequencies for behavioral research across multiple species (dogs 23-54 kHz, cats up to 79 kHz, rodents 30-110 kHz, marine mammals up to 160 kHz, bats 20-80 kHz).
@@ -157,26 +171,55 @@ A primary goal is to integrate with OpenBCI hardware for closed-loop brainwave e
 
 **Pull requests for OpenBCI integration are highly encouraged!**
 
-## Network Streaming (Experimental)
+## Network Streaming
 
-HTTP audio streaming allows wireless playback to VLC or other clients:
+Soulwhistle can serve its live output over HTTP, for listening on another device on your network.
 
 ```bash
-# In Soulwhistle UI
-1. Navigate to NETWORK STREAMING section
+# In Soulwhistle
+1. Navigate to the NETWORK STREAMING section
 2. Enable streaming (Space key)
-3. Optionally adjust port (default: 1123)
+3. Optionally adjust the port (default: 1123)
 
-# On client device
-vlc http://<soulwhistle-ip>:1123/stream.wav
+# On the listening device
+mpv  http://<soulwhistle-ip>:1123/stream.wav
+vlc  http://<soulwhistle-ip>:1123/stream.wav
 ```
 
-**Help Wanted**: This feature needs contributions for improved protocols, buffering, multi-client support, and documentation.
+### Choosing the quality
+
+Add `?fmt=` to the URL:
+
+| URL | Format | Plays in |
+|-----|--------|----------|
+| `/stream.wav` | 16-bit PCM with TPDF dither (default) | Every player and browser |
+| `/stream.wav?fmt=s24` | 24-bit PCM with TPDF dither | VLC, mpv, ffplay, Chrome |
+| `/stream.wav?fmt=f32` | 32-bit float, bit-exact copy of the synth output | VLC, mpv, ffplay, Chrome |
+
+All formats are lossless, stereo and at the output device's native sample rate. Lossy codecs (MP3, AAC, Opus, Bluetooth) are deliberately not offered: they cut content above about 20 kHz and blur the small left/right differences binaural beats rely on.
+
+### How the stream behaves
+
+- New listeners start about 200 ms behind live.
+- Changing preset keeps the connection open: listeners jump straight to the new preset's audio.
+- A listener that falls more than 2 s behind skips ahead to stay live.
+- Ultrasonic layers only reach the listener if the listening device's sound card runs at a high enough sample rate.
+
+### AirPlay and multi-room
+
+These work through the operating system, with no change to Soulwhistle:
+
+- **AirPlay (Linux, PipeWire)**: load PipeWire's `libpipewire-module-raop-discover` module and AirPlay speakers appear as outputs; select one as the default output before starting Soulwhistle. AirPlay carries 44.1 kHz/16-bit only, so ultrasonic content is lost, and it adds 1 to 2 s of latency. See the [PipeWire RAOP documentation](https://docs.pipewire.org/page_module_raop_discover.html).
+- **Lossless multi-room**: [Snapcast](https://github.com/badaix/snapcast) (synchronised, FLAC or PCM) or PipeWire's RTP and ROC network modules.
+
+**Help Wanted**: a FLAC endpoint, a selectable device sample rate (96/192 kHz) for ultrasonic streaming, and direct Snapcast output.
 
 ## Architecture
 
 - **Rust**: High-performance real-time audio synthesis
-- **CPAL**: Cross-platform audio output
+- **CPAL**: Cross-platform audio output (synthesis at the device's native rate)
+- **Real-time safety**: lock-free audio path; recording and streaming run on their own threads
+- **Tests**: `cargo test` checks the notch filter response, waveform aliasing, the WAV writer and the stream formats
 - **TUI**: Real-time interactive mixer interface
 - **HackRF**: Optional RF transmission support
 - **JSON Presets**: Reproducible session configurations

@@ -78,6 +78,14 @@ impl AudioRingBuffer {
         true
     }
 
+    /// Absolute read position `lead` samples behind the newest sample, clamped to
+    /// the oldest sample still held. New listeners start here, near live.
+    pub fn live_position(&self, lead: u64) -> u64 {
+        let st = self.state.lock();
+        let oldest = st.write_count - st.samples.len() as u64;
+        st.write_count.saturating_sub(lead).max(oldest)
+    }
+
     /// Get current stream epoch (for detecting preset changes in streaming clients)
     pub fn get_epoch(&self) -> u32 {
         self.stream_epoch.load(Ordering::Acquire)
@@ -166,10 +174,25 @@ impl StreamingServer {
                 }
             };
 
-            let path = request.url().to_string();
+            let url = request.url().to_string();
+            let (path, query) = match url.split_once('?') {
+                Some((p, q)) => (p.to_string(), q.to_string()),
+                None => (url.clone(), String::new()),
+            };
 
             // Accept /stream.wav or just /
             let is_valid_path = path == "/stream.wav" || path == "/";
+
+            let format = match StreamFormat::from_query(&query) {
+                Ok(f) => f,
+                Err(bad) => {
+                    let response = tiny_http::Response::from_string(format!(
+                        "Unknown format '{}'. Use ?fmt=s16 (default), s24 or f32.\n", bad))
+                        .with_status_code(400);
+                    let _ = request.respond(response);
+                    continue;
+                }
+            };
 
             if is_valid_path {
                 // Clone necessary data for the thread
@@ -184,7 +207,7 @@ impl StreamingServer {
 
                 // Spawn thread to handle this client
                 std::thread::spawn(move || {
-                    if let Err(e) = handle_stream_request(request, buffer.clone()) {
+                    if let Err(e) = handle_stream_request(request, buffer.clone(), format) {
                         eprintln!("Stream error: {}", e);
                     }
 
@@ -216,15 +239,15 @@ impl StreamingServer {
 fn handle_stream_request(
     request: tiny_http::Request,
     buffer: Arc<AudioRingBuffer>,
+    format: StreamFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let sample_rate = buffer.sample_rate();
-    let initial_epoch = buffer.get_epoch(); // Capture epoch at connection start
 
     // Create WAV header for infinite stream
-    let wav_header = create_wav_header(sample_rate);
+    let wav_header = create_wav_header(sample_rate, format);
 
-    // Create a streaming reader
-    let stream_reader = AudioStreamReader::new(buffer, Some(wav_header), initial_epoch);
+    // Create a streaming reader, starting near live
+    let stream_reader = AudioStreamReader::new(buffer, Some(wav_header), format);
     
     // Create response
     let response = tiny_http::Response::new(
@@ -243,24 +266,91 @@ fn handle_stream_request(
     Ok(())
 }
 
+/// Sample format of the HTTP stream, chosen with `?fmt=` on the stream URL.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum StreamFormat {
+    /// 16-bit PCM with TPDF dither. Default: every browser and player accepts it.
+    S16,
+    /// 24-bit PCM with TPDF dither. VLC, mpv, ffplay, Chrome.
+    S24,
+    /// 32-bit IEEE float: bit-exact copy of the synth output. VLC, mpv, ffplay, Chrome.
+    F32,
+}
+
+impl StreamFormat {
+    /// Parse the `fmt` query parameter; `Err` carries the unrecognised value.
+    fn from_query(query: &str) -> Result<Self, String> {
+        for pair in query.split('&') {
+            if let Some(v) = pair.strip_prefix("fmt=") {
+                return match v.to_ascii_lowercase().as_str() {
+                    "s16" | "16" => Ok(Self::S16),
+                    "s24" | "24" => Ok(Self::S24),
+                    "f32" | "float" => Ok(Self::F32),
+                    _ => Err(v.to_string()),
+                };
+            }
+        }
+        Ok(Self::S16)
+    }
+
+    fn bytes_per_sample(self) -> u16 {
+        match self {
+            Self::S16 => 2,
+            Self::S24 => 3,
+            Self::F32 => 4,
+        }
+    }
+}
+
 /// Custom reader that streams audio data
 struct AudioStreamReader {
     buffer: Arc<AudioRingBuffer>,
     position: u64,
     header: Option<Vec<u8>>,
     pcm_buffer: Vec<u8>, // Reusable buffer for PCM conversion
-    initial_epoch: u32,  // Epoch when connection started (to detect preset changes)
+    epoch: u32,          // Last seen epoch (bumped on preset change)
+    format: StreamFormat,
+    dither_state: u32,   // xorshift32 state for TPDF dither
+    lead: u64,           // Samples behind live to (re)start at
 }
 
 impl AudioStreamReader {
-    fn new(buffer: Arc<AudioRingBuffer>, header: Option<Vec<u8>>, initial_epoch: u32) -> Self {
+    fn new(buffer: Arc<AudioRingBuffer>, header: Option<Vec<u8>>, format: StreamFormat) -> Self {
+        let lead = buffer.sample_rate() as u64 * STREAM_START_LEAD_MS / 1000;
+        let position = buffer.live_position(lead);
+        let epoch = buffer.get_epoch();
         Self {
             buffer,
-            position: 0,
+            position,
             header,
             pcm_buffer: Vec::new(),
-            initial_epoch,
+            epoch,
+            format,
+            dither_state: 0x9E37_79B9,
+            lead,
         }
+    }
+
+    /// Triangular (TPDF) dither in LSBs: sum of two uniform values, range (-1, 1).
+    /// Removes the signal-correlated distortion that plain truncation adds.
+    #[inline(always)]
+    fn tpdf(&mut self) -> f32 {
+        let mut next = || {
+            let mut x = self.dither_state;
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            self.dither_state = x;
+            (x >> 8) as f32 / (1u32 << 24) as f32
+        };
+        next() - next()
+    }
+
+    /// Quantise one sample to an integer of `full_scale` with TPDF dither.
+    #[inline(always)]
+    fn quantise(&mut self, x: f32, full_scale: f32) -> i32 {
+        let v = x.clamp(AUDIO_CLAMP_MIN, AUDIO_CLAMP_MAX) * full_scale + self.tpdf();
+        v.round().clamp(-full_scale - 1.0, full_scale) as i32
     }
 }
 
@@ -281,19 +371,24 @@ impl std::io::Read for AudioStreamReader {
 
         // Only read as many samples as fit in `buf` (4 bytes per stereo frame), so the
         // whole PCM batch is always flushed — never truncated and lost.
-        let max_samples = (buf.len() / 4).min(STREAM_READ_CHUNK_SIZE);
+        let frame_bytes = 2 * self.format.bytes_per_sample() as usize;
+        let max_samples = (buf.len() / frame_bytes).min(STREAM_READ_CHUNK_SIZE);
         if max_samples == 0 {
             // Caller-provided buffer can't hold a full stereo frame; signal EOF.
             return Ok(0);
         }
 
-        // Block until data is available, retrying on transient underrun. Returning
-        // Ok(0) here would be interpreted as end-of-stream and close the connection,
-        // so it is reserved exclusively for the preset-change reconnect below.
+        // Block until data is available, retrying on transient underrun. Never
+        // return Ok(0) here: players treat it as end of stream and stop.
         let samples = loop {
-            // Epoch changed (preset changed): close connection to force client reconnect.
-            if self.buffer.get_epoch() != self.initial_epoch {
-                return Ok(0);
+            // Preset changed: the buffer was flushed. Jump to the new preset's audio
+            // (the usual lead behind live, clamped to the first sample after the
+            // flush) and keep the connection open: closing it made VLC and browsers
+            // stop playing.
+            let epoch = self.buffer.get_epoch();
+            if epoch != self.epoch {
+                self.epoch = epoch;
+                self.position = self.buffer.live_position(self.lead);
             }
 
             let samples = self.buffer.read_samples(&mut self.position, max_samples);
@@ -306,16 +401,28 @@ impl std::io::Read for AudioStreamReader {
         };
 
         // Reuse the PCM buffer (clear but keep capacity)
-        self.pcm_buffer.clear();
-        self.pcm_buffer.reserve(samples.len() * 4);
+        let mut pcm = std::mem::take(&mut self.pcm_buffer);
+        pcm.clear();
+        pcm.reserve(samples.len() * frame_bytes);
 
         for (left, right) in samples {
-            let left_i16 = (left.clamp(AUDIO_CLAMP_MIN, AUDIO_CLAMP_MAX) * PCM_I16_MAX) as i16;
-            let right_i16 = (right.clamp(AUDIO_CLAMP_MIN, AUDIO_CLAMP_MAX) * PCM_I16_MAX) as i16;
-
-            self.pcm_buffer.extend_from_slice(&left_i16.to_le_bytes());
-            self.pcm_buffer.extend_from_slice(&right_i16.to_le_bytes());
+            for x in [left, right] {
+                match self.format {
+                    StreamFormat::S16 => {
+                        let v = self.quantise(x, PCM_I16_MAX) as i16;
+                        pcm.extend_from_slice(&v.to_le_bytes());
+                    }
+                    StreamFormat::S24 => {
+                        let v = self.quantise(x, PCM_I24_MAX);
+                        pcm.extend_from_slice(&v.to_le_bytes()[..3]);
+                    }
+                    StreamFormat::F32 => {
+                        pcm.extend_from_slice(&x.clamp(AUDIO_CLAMP_MIN, AUDIO_CLAMP_MAX).to_le_bytes());
+                    }
+                }
+            }
         }
+        self.pcm_buffer = pcm;
 
         // PCM batch is sized to fit `buf` by construction, so this copies all of it.
         let len = self.pcm_buffer.len().min(buf.len());
@@ -325,9 +432,16 @@ impl std::io::Read for AudioStreamReader {
     }
 }
 
-/// Create a WAV file header for streaming
-fn create_wav_header(sample_rate: u32) -> Vec<u8> {
-    let mut header = Vec::new();
+/// Create a WAV file header for an endless stream in the given format.
+fn create_wav_header(sample_rate: u32, format: StreamFormat) -> Vec<u8> {
+    let bytes = format.bytes_per_sample();
+    let block_align = WAV_STEREO_CHANNELS * bytes;
+    let (format_tag, fmt_size) = match format {
+        // IEEE float needs the 18-byte fmt chunk (with cbSize = 0).
+        StreamFormat::F32 => (WAV_IEEE_FLOAT_FORMAT, 18u32),
+        _ => (WAV_PCM_FORMAT, 16u32),
+    };
+    let mut header = Vec::with_capacity(46);
 
     // RIFF header
     header.extend_from_slice(b"RIFF");
@@ -336,17 +450,115 @@ fn create_wav_header(sample_rate: u32) -> Vec<u8> {
 
     // fmt chunk
     header.extend_from_slice(b"fmt ");
-    header.extend_from_slice(&16u32.to_le_bytes()); // Chunk size
-    header.extend_from_slice(&WAV_PCM_FORMAT.to_le_bytes());
+    header.extend_from_slice(&fmt_size.to_le_bytes());
+    header.extend_from_slice(&format_tag.to_le_bytes());
     header.extend_from_slice(&WAV_STEREO_CHANNELS.to_le_bytes());
     header.extend_from_slice(&sample_rate.to_le_bytes());
-    header.extend_from_slice(&(sample_rate * WAV_BLOCK_ALIGN as u32).to_le_bytes());
-    header.extend_from_slice(&WAV_BLOCK_ALIGN.to_le_bytes());
-    header.extend_from_slice(&WAV_BITS_PER_SAMPLE.to_le_bytes());
+    header.extend_from_slice(&(sample_rate * block_align as u32).to_le_bytes());
+    header.extend_from_slice(&block_align.to_le_bytes());
+    header.extend_from_slice(&(bytes * 8).to_le_bytes());
+    if fmt_size == 18 {
+        header.extend_from_slice(&0u16.to_le_bytes()); // cbSize
+    }
 
     // data chunk
     header.extend_from_slice(b"data");
     header.extend_from_slice(&WAV_INFINITE_SIZE.to_le_bytes());
 
     header
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Read;
+
+    fn buffer_with(samples: usize) -> Arc<AudioRingBuffer> {
+        let b = Arc::new(AudioRingBuffer::new(48000, 2000));
+        let data: Vec<(f32, f32)> = (0..samples).map(|i| (i as f32 / samples as f32, -0.5)).collect();
+        b.push_samples_batch(&data);
+        b
+    }
+
+    #[test]
+    fn query_selects_format() {
+        assert_eq!(StreamFormat::from_query(""), Ok(StreamFormat::S16));
+        assert_eq!(StreamFormat::from_query("fmt=f32"), Ok(StreamFormat::F32));
+        assert_eq!(StreamFormat::from_query("x=1&fmt=S24"), Ok(StreamFormat::S24));
+        assert!(StreamFormat::from_query("fmt=mp3").is_err());
+    }
+
+    #[test]
+    fn headers_describe_each_format() {
+        for (fmt, tag, bits, len) in [
+            (StreamFormat::S16, 1u16, 16u16, 44usize),
+            (StreamFormat::S24, 1, 24, 44),
+            (StreamFormat::F32, 3, 32, 46),
+        ] {
+            let h = create_wav_header(48000, fmt);
+            assert_eq!(h.len(), len);
+            assert_eq!(u16::from_le_bytes([h[20], h[21]]), tag);
+            assert_eq!(u16::from_le_bytes([h[34], h[35]]), bits);
+            let block = u16::from_le_bytes([h[32], h[33]]);
+            assert_eq!(block, 2 * bits / 8);
+            assert_eq!(u32::from_le_bytes(h[28..32].try_into().unwrap()), 48000 * block as u32);
+            assert_eq!(&h[len - 8..len - 4], b"data");
+        }
+    }
+
+    #[test]
+    fn new_listener_starts_near_live() {
+        let b = buffer_with(48000); // 1 s buffered
+        let r = AudioStreamReader::new(b, None, StreamFormat::S16);
+        let lead = 48000 * STREAM_START_LEAD_MS / 1000;
+        assert_eq!(r.position, 48000 - lead);
+    }
+
+    #[test]
+    fn stream_survives_preset_change() {
+        let b = buffer_with(4800);
+        let mut r = AudioStreamReader::new(b.clone(), None, StreamFormat::F32);
+        let mut buf = [0u8; 4096];
+        assert!(r.read(&mut buf).unwrap() > 0);
+
+        // Preset change: flush, then new audio arrives.
+        assert!(b.try_flush());
+        b.push_samples_batch(&[(0.25, 0.75); 480]);
+        let n = r.read(&mut buf).unwrap();
+        assert!(n > 0, "connection must stay open across a preset change");
+        // Reader jumped to the new audio, not leftovers from the old preset.
+        let l = f32::from_le_bytes(buf[0..4].try_into().unwrap());
+        let rr = f32::from_le_bytes(buf[4..8].try_into().unwrap());
+        assert_eq!((l, rr), (0.25, 0.75));
+    }
+
+    #[test]
+    fn f32_is_bit_exact_and_ints_are_close() {
+        let vals = [(0.123456f32, -0.987654f32); 64];
+        for fmt in [StreamFormat::S16, StreamFormat::S24, StreamFormat::F32] {
+            let b = Arc::new(AudioRingBuffer::new(48000, 2000));
+            b.push_samples_batch(&vals);
+            let mut r = AudioStreamReader::new(b, None, fmt);
+            let mut buf = [0u8; 4096];
+            let n = r.read(&mut buf).unwrap();
+            let bps = fmt.bytes_per_sample() as usize;
+            assert_eq!(n, 64 * 2 * bps);
+            let decode = |c: &[u8]| -> f32 {
+                match fmt {
+                    StreamFormat::S16 => i16::from_le_bytes([c[0], c[1]]) as f32 / PCM_I16_MAX,
+                    StreamFormat::S24 => (i32::from_le_bytes([0, c[0], c[1], c[2]]) >> 8) as f32 / PCM_I24_MAX,
+                    StreamFormat::F32 => f32::from_le_bytes(c.try_into().unwrap()),
+                }
+            };
+            let tol = match fmt {
+                StreamFormat::S16 => 2.0 / PCM_I16_MAX,
+                StreamFormat::S24 => 2.0 / PCM_I24_MAX,
+                StreamFormat::F32 => 0.0,
+            };
+            for frame in buf[..n].chunks(2 * bps) {
+                assert!((decode(&frame[..bps]) - vals[0].0).abs() <= tol, "{fmt:?} left");
+                assert!((decode(&frame[bps..]) - vals[0].1).abs() <= tol, "{fmt:?} right");
+            }
+        }
+    }
 }
