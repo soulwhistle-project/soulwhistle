@@ -1,9 +1,9 @@
 //! Minimal DSP building blocks for tailor-made notched sound therapy.
 //!
 //! Notched sound therapy (Okamoto et al. 2010, PNAS; Pantev/Stein follow-ups)
-//! removes a band of energy centered on the listener's tinnitus pitch. Neurons at
-//! the notch edges fire normally and laterally inhibit the over-active
-//! tinnitus-frequency neurons, reducing perceived loudness over weeks of daily use.
+//! removes a band of energy centered on the listener's tinnitus pitch. The proposed
+//! mechanism is lateral inhibition of the over-active tinnitus-frequency neurons by
+//! neurons at the notch edges; clinical evidence is mixed (CITATIONS.md, 35 to 39).
 
 use crate::constants::NYQUIST_SAFE_FRACTION;
 use num_complex::Complex64;

@@ -94,10 +94,10 @@ Recordings are saved as `rec_<timestamp>.wav` in a `recordings` folder next to t
 Soulwhistle includes presets based on peer-reviewed research and established protocols. Experimental presets (clearly marked with `[EXPERIMENTAL]` in the UI) are exploratory and not peer-reviewed.
 
 ### General Focus & Meditation
-- **Deep Focus (Active)**: Beta/low-gamma for concentration (12-15 Hz)
-- **Deep Focus (Calm)**: Alpha/theta for relaxed focus (8-10 Hz)
-- **Deep Focus (ADHD)**: Optimized beta protocol for ADHD research
-- **Deep Focus (Peak)**: High beta/gamma for peak performance (18-25 Hz)
+- **Deep Focus - Active**: 18 Hz beta for concentration
+- **Deep Focus - ADHD Primary**: 10 Hz alpha
+- **Deep Focus - SMR**: 14 Hz beta (experimental)
+- **Deep Focus - Gamma**: 40 Hz (experimental; evidence for 40 Hz binaural beats is weak, see `CITATIONS.md`)
 
 ### Monroe Institute-Derived Examples
 These presets are based on independent FFT analysis of Monroe Institute techniques:
@@ -124,7 +124,7 @@ These presets implement frequency combinations from anecdotal UAP research commu
 - **UAP Brycehelm**: Bryce Helm's design (783 Hz carrier AM @ 7.83 Hz) - github.com/brycehelm/UAP_Dog_Whistle
 - **UAP Sweep 18kHz**: UAPWatchers guide variant (requires piezo transducers or RF mode)
 - **UAP Sweep 24kHz**: Extended ultrasonic sweep (requires RF transmission mode)
-- **UAP RF Ultrasonic**: Anecdotal electromagnetic approach at 1.42 GHz Hydrogen Line (HackRF required)
+- **UAP RF Ultrasonic**: Anecdotal electromagnetic approach built around the 1.42 GHz hydrogen line. **Transmitting there is illegal everywhere**: 1400-1427 MHz is reserved for radio astronomy and ITU Radio Regulations footnote 5.340 prohibits all emissions in it, whatever licence you hold. Keep RF disabled with this preset.
 
 **Important:**
 - No scientific validation exists for UAP contact via audio/RF frequencies

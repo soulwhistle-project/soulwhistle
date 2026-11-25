@@ -423,7 +423,7 @@ This file lists the key research papers and articles that inform the principles 
 
 ### 22. Iaccarino, H. F., Singer, A. C., Martorell, A. J., Rudenko, A., Gao, F., Gillingham, T. Z., Mathys, H., Seo, J., Kritber, O., Abdurrob, F., Kim, S. Y., Bhatt, R., & Tsai, L.-H. (2016). Gamma frequency entrainment attenuates amyloid load and modifies microglia. *Nature, 540*(7632), 230-235.
 
-**Relevance:** Landmark MIT study demonstrating that 40 Hz sensory stimulation reduces Alzheimer's amyloid plaques in mouse models. Foundation for the entire gamma stimulation neuroprotection research program. Directly supports the 40 Hz gamma preset.
+**Relevance:** Landmark MIT study showing that 40 Hz light flicker reduced amyloid in mouse models of Alzheimer's disease. Foundation of the gamma stimulation research programme. It used light, not sound, and says nothing directly about 40 Hz binaural beats (see entries 30 to 34).
 
 **DOI:** 10.1038/nature20587
 **PMID:** 27929004
@@ -444,20 +444,20 @@ This file lists the key research papers and articles that inform the principles 
 }
 ```
 
-### 23. Blanco-Duque, C., Chan, D., Bhatt, M., & Bhatt, J. (2024). Audiovisual gamma stimulation for the treatment of neurodegeneration. *Journal of Internal Medicine, 295*(2), 146-170.
+### 23. Blanco-Duque, C., Chan, D., Kahn, M. C., Murdock, M. H., & Tsai, L.-H. (2024). Audiovisual gamma stimulation for the treatment of neurodegeneration. *Journal of Internal Medicine, 295*(2), 146-170.
 
-**Relevance:** Comprehensive review of 40 Hz audiovisual stimulation research including Phase II clinical trial results in Alzheimer's patients. Found significant slowing of brain atrophy, preserved white matter, and cognitive improvements. Mechanism: 40 Hz stimulates VIP peptide release from interneurons, increasing amyloid clearance via glymphatic system. Supports longer therapeutic gamma sessions beyond the current 15-min preset.
+**Relevance:** Review of 40 Hz audiovisual stimulation research, from mouse studies to early clinical trials in Alzheimer's disease. The review itself treats the human evidence as preliminary. It concerns combined light and sound stimulation, not binaural beats. (Earlier versions of this file listed two invented co-authors; corrected November 2026.)
 
 **DOI:** 10.1111/joim.13755
 **PMID:** 38164979
 
-**APA:** Blanco-Duque, C., Chan, D., Bhatt, M., & Bhatt, J. (2024). Audiovisual gamma stimulation for the treatment of neurodegeneration. *Journal of Internal Medicine, 295*(2), 146-170.
+**APA:** Blanco-Duque, C., Chan, D., Kahn, M. C., Murdock, M. H., & Tsai, L.-H. (2024). Audiovisual gamma stimulation for the treatment of neurodegeneration. *Journal of Internal Medicine, 295*(2), 146-170.
 
 **BibTeX:**
 ```bibtex
 @article{blancoduque2024audiovisual,
   title={Audiovisual gamma stimulation for the treatment of neurodegeneration},
-  author={Blanco-Duque, Cristina and Chan, Dennis and Bhatt, Mihir and Bhatt, Jayan},
+  author={Blanco-Duque, Cristina and Chan, Diane and Kahn, Martin C and Murdock, Mitchell H and Tsai, Li-Huei},
   journal={Journal of Internal Medicine},
   volume={295},
   number={2},
@@ -473,7 +473,7 @@ This file lists the key research papers and articles that inform the principles 
 
 ### 24. Akimoto, K., Hu, A., Yamaguchi, T., & Kobayashi, H. (2018). Effect of 528 Hz music on the endocrine system and autonomic nervous system. *Health, 10*(9), 1159-1170.
 
-**Relevance:** Only human study on 528 Hz. Nine participants listened to 528 Hz vs 440 Hz music in crossover design. 528 Hz significantly decreased cortisol, increased oxytocin, and reduced tension-anxiety and total mood disturbance scores (POMS 2). No significant changes with 440 Hz. Supports 528 Hz as carrier/ambient frequency for stress reduction. Limitations: n=9, 8 women/1 man, no blinding described.
+**Relevance:** Small pilot study, in a low-tier journal; we found no other human study of 528 Hz. Nine participants listened to 528 Hz vs 440 Hz music in crossover design. 528 Hz significantly decreased cortisol, increased oxytocin, and reduced tension-anxiety and total mood disturbance scores (POMS 2). No significant changes with 440 Hz. It tested music tuned to 528 Hz, not a pure 528 Hz tone. Limitations: n=9, 8 women/1 man, no blinding described. Too small to support any claim; no evidence supports the popular "DNA repair" label for 528 Hz.
 
 **DOI:** 10.4236/health.2018.109088
 
@@ -495,7 +495,7 @@ This file lists the key research papers and articles that inform the principles 
 
 ### 25. Babayi Daylari, T., Riazi, G. H., Pooyan, S., Fathi, E., & Hedayati Katouli, F. (2019). Influence of various intensities of 528 Hz sound-wave in production of testosterone in rat's brain and analysis of its gene expression. *Genes & Genomics, 41*(2), 201-211.
 
-**Relevance:** 528 Hz at 100 dB increased testosterone production in rat brains by enhancing StAR and SF-1 gene expression while reducing P450 aromatase. Reduced total reactive oxygen species in brain tissue and decreased anxiety-related behaviors. Establishes a molecular mechanism (testosterone pathway) for 528 Hz anxiolytic effects.
+**Relevance:** 528 Hz at 100 dB increased testosterone production in rat brains by enhancing StAR and SF-1 gene expression while reducing P450 aromatase. Reduced total reactive oxygen species in brain tissue and decreased anxiety-related behaviors. Animal study at a very loud 100 dB; it does not establish an effect in humans.
 
 **PMID:** 30414050
 **DOI:** 10.1007/s13258-018-0753-6
@@ -518,7 +518,7 @@ This file lists the key research papers and articles that inform the principles 
 
 ### 26. Calamassi, D., & Pomponi, G. P. (2019). Music tuned to 440 Hz versus 432 Hz and the health effects: A double-blind cross-over pilot study. *Explore, 15*(4), 283-290.
 
-**Relevance:** Double-blind crossover study comparing 432 Hz vs 440 Hz tuned music. 432 Hz produced significant heart rate decrease (-4.79 bpm, p=0.05), slight decreases in blood pressure and respiratory rate, and participants reported greater satisfaction and focus. Supports 432 Hz as ambient pad frequency in UAP and relaxation presets.
+**Relevance:** Double-blind crossover study comparing 432 Hz vs 440 Hz tuned music. 432 Hz produced significant heart rate decrease (-4.79 bpm, p=0.05), slight decreases in blood pressure and respiratory rate, and participants reported greater satisfaction and focus. Pilot study with a borderline result (p = 0.05). A larger 2025 crossover trial found no difference between 432 Hz and 443 Hz tuning (entry 40).
 
 **PMID:** 31031095
 **DOI:** 10.1016/j.explore.2019.04.001
@@ -541,6 +541,104 @@ This file lists the key research papers and articles that inform the principles 
 
 ---
 
+## Evidence Reviews and Key Trials (added November 2026)
+
+These records were checked against Crossref. They give the current state of the evidence and correct earlier, stronger readings in this file and in the presets.
+
+### Binaural beats: overall evidence
+
+### 27. Garcia-Argibay, M., Santed, M. A., & Reales, J. M. (2019). Efficacy of binaural auditory beats in cognition, anxiety, and pain perception: a meta-analysis. *Psychological Research*, *83*(2), 357-372.
+
+**Relevance:** Meta-analysis of 22 studies. Pooled effect g = 0.45 across memory, attention, anxiety and pain perception, with considerable variation between studies.
+
+**DOI:** 10.1007/s00426-018-1066-8
+
+### 28. Ingendoh, R. M., Posny, E. S., & Heine, A. (2023). Binaural beats to entrain the brain? A systematic review of the effects of binaural beat stimulation on brain oscillatory activity, and the implications for psychological research and intervention. *PLOS ONE*, *18*(5), e0286023.
+
+**Relevance:** Systematic review of EEG studies: only 5 of 14 found evidence of brainwave entrainment, and the overall evidence was judged inconsistent. Beats are perceived most clearly at low beat frequencies (roughly up to 30 Hz).
+
+**DOI:** 10.1371/journal.pone.0286023
+
+### 29. Basu, S., & Banerjee, B. (2023). Potential of binaural beats intervention for improving memory and attention: insights from meta-analysis and systematic review. *Psychological Research*, *87*(4), 951-963.
+
+**Relevance:** Meta-analysis on memory and attention: g = 0.40 overall, with conflicting results for theta and beta beats.
+
+**DOI:** 10.1007/s00426-022-01706-7
+
+### 30. Schwarz, D., & Taylor, P. (2005). Human auditory steady state responses to binaural and monaural beats. *Clinical Neurophysiology*, *116*(3), 658-668.
+
+**Relevance:** Measured 40 Hz brain responses to binaural and monaural beats. The binaural response appeared with a 400 Hz carrier and disappeared above 3 kHz, supporting low carriers; monaural (acoustic) beats gave a larger response than binaural beats.
+
+**DOI:** 10.1016/j.clinph.2004.09.014
+
+### 31. Engelbregt, H., Barmentlo, M., Keeser, D., Pogarell, O., & Deijen, J. B. (2021). Effects of binaural and monaural beat stimulation on attention and EEG. *Experimental Brain Research*, *239*(9), 2781-2791.
+
+**Relevance:** 40 Hz binaural and monaural beats in 25 participants: fewer errors on an attention task, but no EEG entrainment.
+
+**DOI:** 10.1007/s00221-021-06155-z
+
+### 40 Hz gamma stimulation
+
+### 32. Rakhshan, V., Hassani-Abharian, P., Joghataei, M., Nasehi, M., & Khosrowabadi, R. (2022). Effects of the Alpha, Beta, and Gamma Binaural Beat Brain Stimulation and Short‐Term Training on Simultaneously Assessed Visuospatial and Verbal Working Memories, Signal Detection Measures, Response Times, and Intrasubject Response Time Variabilities: A Within‐Subject Randomized Placebo‐Controlled Clinical Trial. *BioMed Research International*, *2022*(1), 8588272.
+
+**Relevance:** Randomised placebo-controlled trial (n = 31) of 10, 16 and 40 Hz binaural beats during a 2-back working-memory task. The only effects were slight benefits of 10 Hz on the visuospatial task. It found no working-memory improvement from 40 Hz and reported no EEG results. Earlier versions of the 40 Hz preset described this study as confirming gamma EEG induction and working-memory gains; that was wrong.
+
+**DOI:** 10.1155/2022/8588272
+
+### 33. Chan, D., Suk, H.-J., Jackson, B. L., Milman, N. P., Stark, D., Klerman, E. B., Kitchener, E., Fernandez Avalos, V. S., de Weck, G., Banerjee, A., Beach, S. D., Blanchard, J., Stearns, C., Boes, A. D., Uitermarkt, B., Gander, P., Howard, M., Sternberg, E. J., Nieto-Castanon, A., ... Tsai, L.-H. (2022). Gamma frequency sensory stimulation in mild probable Alzheimer’s dementia patients: Results of feasibility and pilot studies. *PLOS ONE*, *17*(12), e0278412.
+
+**Relevance:** Phase 1 study and a 15-patient pilot of combined 40 Hz light and sound in mild Alzheimer's disease. Showed safety and entrainment; clinical outcomes were exploratory only. Uses light and sound, not binaural beats.
+
+**DOI:** 10.1371/journal.pone.0278412
+
+### 34. Murdock, M. H., Yang, C.-Y., Sun, N., Pao, P.-C., Blanco-Duque, C., Kahn, M. C., Kim, T., Lavoie, N. S., Victor, M. B., Islam, M. R., Galiana, F., Leary, N., Wang, S., Bubnys, A., Ma, E., Akay, L. A., Sneve, M., Qian, Y., Lai, C., ... Tsai, L.-H. (2024). Multisensory gamma stimulation promotes glymphatic clearance of amyloid. *Nature*, *627*(8002), 149-156.
+
+**Relevance:** In mice, multisensory 40 Hz stimulation increased glymphatic clearance of amyloid. Animal study; not binaural beats.
+
+**DOI:** 10.1038/s41586-024-07132-6
+
+### Notched sound therapy for tinnitus
+
+### 35. Okamoto, H., Stracke, H., Stoll, W., & Pantev, C. (2010). Listening to tailor-made notched music reduces tinnitus loudness and tinnitus-related auditory cortex activity. *Proceedings of the National Academy of Sciences*, *107*(3), 1207-1210.
+
+**Relevance:** The original tailor-made notched music study. Removing a one-octave band around the tinnitus pitch from music reduced tinnitus loudness and related auditory-cortex activity. Basis of the tinnitus notch preset.
+
+**DOI:** 10.1073/pnas.0911268107
+
+### 36. Stein, A., Wunderlich, R., Lau, P., Engell, A., Wollbrink, A., Shaykevich, A., Kuhn, J.-T., Holling, H., Rudack, C., & Pantev, C. (2016). Clinical trial on tonal tinnitus with tailor-made notched music training. *BMC Neurology*, *16*(1), 38.
+
+**Relevance:** Double-blind randomised trial in 100 patients, using a half-octave notch with edge enhancement. No effect on the primary outcomes (tinnitus questionnaire, visual analogue scales); loudness was lower only at the 1-month follow-up. It did not compare notch widths.
+
+**DOI:** 10.1186/s12883-016-0558-7
+
+### 37. Wunderlich, R., Lau, P., Stein, A., Engell, A., Wollbrink, A., Rudack, C., & Pantev, C. (2015). Impact of Spectral Notch Width on Neurophysiological Plasticity and Clinical Effectiveness of the Tailor-Made Notched Music Training. *PLOS ONE*, *10*(9), e0138595.
+
+**Relevance:** Compared 1, 1/2 and 1/4 octave notches and found that notch width did not influence behavioural or neurophysiological outcomes.
+
+**DOI:** 10.1371/journal.pone.0138595
+
+### 38. Tavanai, E., Rahimi, V., Bandad, M., Khalili, M. E., & Fallahnezhad, T. (2024). Efficacy of tailor-made notched music training (TMNMT) in the treatment of tinnitus: a systematic review and meta-analysis. *European Archives of Oto-Rhino-Laryngology*, *281*(10), 5033-5049.
+
+**Relevance:** Systematic review and meta-analysis: no significant effect of notched music training on the Tinnitus Handicap Inventory.
+
+**DOI:** 10.1007/s00405-024-08732-8
+
+### 39. Jiang, W., Zheng, Y., Zheng, C., Chen, R., & Li, B. (2025). The efficacy of notched music therapy vs conventional music therapy for chronic subjective tinnitus patients: a systematic review and meta-analysis. *European Archives of Oto-Rhino-Laryngology*, *282*(7), 3431-3442.
+
+**Relevance:** Meta-analysis of 14 trials (793 patients) comparing notched with conventional music therapy: a small benefit (Tinnitus Handicap Inventory about 8.6 points lower); notch range did not explain the differences between studies.
+
+**DOI:** 10.1007/s00405-025-09260-9
+
+### 432 Hz tuning
+
+### 40. Hohneck, A., Rodríguez, Á. M., Weingärtner, S., Merx, K., Sarodnick, F., von Gagern, F., Mavratzas, A., Burkholder, I., Schumacher, G., Hofmann, W.-K., & Hofheinz, R.-D. (2025). Differential effects of sound interventions tuned to 432 Hz or 443 Hz on cardiovascular parameters in cancer patients: a randomized cross-over trial. *BMC Complementary Medicine and Therapies*, *25*(1), 18.
+
+**Relevance:** Crossover trial in 43 participants comparing sound interventions tuned to 432 Hz and 443 Hz: no significant difference between the two tunings.
+
+**DOI:** 10.1186/s12906-025-04758-5
+
+---
+
 ## Research Quality Notes
 
 ### Strengths:
@@ -557,13 +655,14 @@ This file lists the key research papers and articles that inform the principles 
 - Publication bias (negative results underreported)
 
 ### Current Scientific Consensus (2026):
-1. Binaural beats CAN produce measurable EEG changes
+1. Binaural beats show small to moderate behavioural effects in meta-analyses (entries 27, 29), but EEG evidence of entrainment is inconsistent (entry 28)
 2. Effects are HIGHLY INDIVIDUAL and often subtle
 3. Anxiety reduction has most consistent evidence
 4. Cognitive enhancement claims are overstated
-5. 40 Hz gamma stimulation has strongest emerging clinical evidence (Phase III trial underway)
-6. 528 Hz and 432 Hz have preliminary but small-sample support for stress/relaxation
-7. More research needed with standardized protocols
+5. 40 Hz stimulation evidence comes mainly from mice and from light-and-sound devices, not binaural beats. Cognito Therapeutics' pivotal HOPE trial of 40 Hz light and sound (n = 673) was reported in November 2026 to have missed its primary endpoint (industry report: https://www.fiercebiotech.com/medtech/cognito-phase-3-flops-light-and-sound-alzheimers-trial-sees-signal-hope; peer-reviewed results pending)
+6. 528 Hz and 432 Hz have no reliable evidence: small pilots only, and a larger 432 Hz trial found no difference (entry 40)
+7. Notched sound therapy for tinnitus has mixed evidence, and no notch width has been shown to be better than another (entries 35 to 39)
+8. More research needed with standardized protocols
 
 ---
 

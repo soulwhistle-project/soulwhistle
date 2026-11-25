@@ -1,6 +1,6 @@
 {
   "preset_title": "UAP RF Ultrasonic",
-  "preset_description": "RESEARCH TOOL ONLY - NO CLAIMS MADE. RF electromagnetic transmission at 1.42GHz (Hydrogen Line) - SETI's 'magic frequency' and protected radio astronomy band. WARNING: Transmission on this frequency is ILLEGAL in most jurisdictions without proper authorization. This is a protected frequency for scientific research. Requires amateur radio license or research authorization. Combines Schumann resonance modulation with ultrasonic signaling. Enable RF in settings at YOUR OWN LEGAL RISK. We provide the tool; you are responsible for legal compliance.",
+  "preset_description": "RESEARCH TOOL ONLY - NO CLAIMS MADE. Concept: the 1.42 GHz hydrogen line, SETI's 'magic frequency', combined with Schumann resonance modulation and ultrasonic signalling. ILLEGAL TO TRANSMIT: the 1400-1427 MHz band, which contains the hydrogen line (1420.4 MHz), is reserved worldwide for passive radio astronomy. ITU Radio Regulations footnote 5.340 states that all emissions are prohibited in this band, and national regulators enforce it. No licence permits transmitting here: not an amateur licence (the amateur 23 cm band is 1240-1300 MHz) and not ordinary research authorization. Keep RF disabled with this preset; the frequency is included as a concept for listening only. If you hold a licence for another band, retune before enabling RF. You are responsible for legal compliance.",
   "experimental": true,
   "carrier_vol": 0.5,
   "carrier_type": "SchumannAM",

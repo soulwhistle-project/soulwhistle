@@ -69,10 +69,10 @@ This directory contains multiple UAP "dog whistle" preset implementations based 
 
 **⚠️ RF TRANSMISSION LEGAL WARNING:**
 - This preset enables electromagnetic transmission
-- Requires appropriate radio operator license in most countries
-- 1.42 GHz (Hydrogen Line) is protected for radio astronomy
-- Transmission on this frequency may be ILLEGAL without authorization
-- Check with your local telecommunications authority before use
+- Transmitting at 1.42 GHz is ILLEGAL everywhere: 1400-1427 MHz is reserved for passive radio astronomy, and ITU Radio Regulations footnote 5.340 states that all emissions are prohibited in this band
+- No licence permits transmitting there; the amateur 23 cm band is 1240-1300 MHz
+- Keep RF disabled with this preset; any other band needs the licence that band requires
+- Check with your local telecommunications authority before any transmission
 - We provide this as a research tool only - users are responsible for legal compliance
 
 **Key Features**:
@@ -144,7 +144,7 @@ The 1.42 GHz (1420 MHz) frequency is significant in both SETI (Search for Extrat
 
 **CRITICAL LEGAL WARNING:**
 - 1.42 GHz is a **protected frequency** for radio astronomy
-- Transmission on this frequency **may be illegal** in most jurisdictions
+- Transmission in 1400-1427 MHz **is prohibited worldwide** (ITU Radio Regulations footnote 5.340: all emissions are prohibited)
 - Can interfere with scientific research and space communication
 - Requires appropriate licenses and authorization
 - **Check local telecommunications regulations before ANY transmission**

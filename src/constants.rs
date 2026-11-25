@@ -10,7 +10,8 @@ pub const CARRIER_BASE_HZ: f32 = 100.0;
 /// Brycehelm variant carrier frequency (783 Hz)
 pub const CARRIER_783_HZ: f32 = 783.0;
 
-/// Solfeggio frequency - Mi (528 Hz) - DNA repair frequency
+/// Solfeggio frequency - Mi (528 Hz). Popularly called a "DNA repair" frequency;
+/// no evidence supports that (see CITATIONS.md, entry 24).
 pub const SOLFEGGIO_MI_HZ: f32 = 528.0;
 
 /// Verdi's A (432 Hz) - Natural tuning
@@ -45,7 +46,9 @@ pub const GAMMA_BURST_DURATION_SECS: f32 = 3.0;
 /// Gamma burst carrier frequency
 pub const GAMMA_CARRIER_HZ: f32 = 300.0;
 
-/// Gamma burst binaural beat (40 Hz) — gamma entrainment per Iaccarino et al. 2016.
+/// Gamma burst binaural beat (40 Hz). The 40 Hz literature (Iaccarino et al. 2016,
+/// Murdock et al. 2024) used light flicker and click trains in mice, not binaural
+/// beats; evidence for 40 Hz binaural beats is weak (CITATIONS.md, entries 30 to 34).
 /// The brain follows binaural beats only up to ~40 Hz, so this must stay in range.
 pub const GAMMA_BEAT_HZ: f32 = 40.0;
 
@@ -261,8 +264,8 @@ pub const TINNITUS_FREQ_MAX_HZ: f32 = 12000.0;
 pub const TINNITUS_FREQ_COARSE_STEP: f32 = 250.0;
 pub const TINNITUS_FREQ_FINE_STEP: f32 = 25.0;
 
-/// Default notch width (octaves). Stein et al. 2016 found narrower notches give
-/// stronger lateral inhibition than the 1-octave width of Okamoto et al. 2010.
+/// Default notch width (octaves): 0.5, the protocol of Stein et al. 2016. Okamoto et al.
+/// 2010 used 1 octave; Wunderlich et al. 2015 found width made no difference.
 pub const DEFAULT_NOTCH_WIDTH_OCT: f32 = 0.5;
 
 /// Notch width adjustable range (octaves) and step
