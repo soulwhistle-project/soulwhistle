@@ -4,7 +4,7 @@ use rand::rngs::SmallRng;
 use serde::{Deserialize, Serialize};
 use crate::coherence::CoherenceParams;
 use crate::constants::*;
-use crate::utils::{generate_waveform, fast_sin, soft_clip};
+use crate::utils::{generate_waveform, harmonics_below, fast_sin, soft_clip};
 
 #[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Debug)]
 pub enum SignalType {
@@ -369,6 +369,8 @@ impl Synthesizer {
     fn generate_signal_components(&mut self, params: &AudioParams, dt: f32) -> SignalComponents {
         let pi2 = 2.0 * std::f32::consts::PI;
         let mut components = SignalComponents::default();
+        // Highest harmonic frequency the band-limited waveforms may contain.
+        let nyquist_limit = self.sample_rate * NYQUIST_SAFE_FRACTION;
 
         // 1. Carrier
         self.phase_100hz = (self.phase_100hz + CARRIER_BASE_HZ * dt * pi2) % pi2;
@@ -385,24 +387,26 @@ impl Synthesizer {
             },
             SignalType::Schumann783AM => fast_sin(self.phase_783hz) * (AM_MODULATION_MIN + AM_MODULATION_MIN * fast_sin(self.phase_7_83hz)),
             SignalType::Sine100Hz => fast_sin(self.phase_100hz),
-            SignalType::Square => if fast_sin(self.phase_100hz) >= 0.0 { 1.0 } else { -1.0 },
+            SignalType::Square => generate_waveform(
+                self.phase_100hz, SignalType::Square, harmonics_below(CARRIER_BASE_HZ, nyquist_limit)),
             _ => fast_sin(self.phase_100hz),
         };
 
         // 2. Harmonic: 528 Hz (Solfeggio Mi)
         self.phase_528hz = (self.phase_528hz + SOLFEGGIO_MI_HZ * dt * pi2) % pi2;
-        components.harmonic = generate_waveform(self.phase_528hz, params.harmonic_type);
+        components.harmonic = generate_waveform(
+            self.phase_528hz, params.harmonic_type, harmonics_below(SOLFEGGIO_MI_HZ, nyquist_limit));
 
         // 3. Ultrasonic Ping
         // Nyquist guard: a ping above the Nyquist limit can't be reproduced and would
         // alias down to an audible tone (e.g. 40 kHz @ 48 kHz -> 8 kHz). Mute it instead
         // of emitting a false frequency. Margin keeps it clear of the fold point.
         self.phase_17khz = (self.phase_17khz + params.ping_freq_hz * dt * pi2) % pi2;
-        let nyquist_limit = self.sample_rate * NYQUIST_SAFE_FRACTION;
         components.ping = if params.ping_freq_hz > nyquist_limit {
             0.0
         } else {
-            generate_waveform(self.phase_17khz, params.ping_type)
+            generate_waveform(self.phase_17khz, params.ping_type,
+                harmonics_below(params.ping_freq_hz, nyquist_limit))
         };
 
         // 4. Chirps
@@ -449,7 +453,8 @@ impl Synthesizer {
 
         // 5. 432 Hz Ambient Pad (Verdi's A)
         self.phase_432hz = (self.phase_432hz + VERDI_A_HZ * dt * pi2) % pi2;
-        components.pad = generate_waveform(self.phase_432hz, params.pad_type);
+        components.pad = generate_waveform(
+            self.phase_432hz, params.pad_type, harmonics_below(VERDI_A_HZ, nyquist_limit));
 
         // 6. Breath Layer: White noise shaped
         self.breath_phase = (self.breath_phase + BREATH_LFO_HZ * dt * pi2) % pi2;
