@@ -26,6 +26,7 @@ pub struct RfWorker {
     // Synthesis state for RF
     synth: Synthesizer,
     phase_accumulator: f32, // For FM
+    hold_accumulator: f64,  // Fractional RF-samples-per-audio-sample carry (see run)
     audio_sample_rate: f32, // Track the actual audio sample rate
 }
 
@@ -42,6 +43,7 @@ impl RfWorker {
             last_check_time: std::time::Instant::now(),
             synth: Synthesizer::new(audio_sample_rate),
             phase_accumulator: 0.0,
+            hold_accumulator: 0.0,
             audio_sample_rate,
             error_tx,
         }
@@ -60,7 +62,11 @@ impl RfWorker {
     }
 
     pub fn run(&mut self) {
-        let samples_per_audio_tick = (RF_SAMPLE_RATE_HZ / self.audio_sample_rate) as usize;
+        // RF samples per audio sample is not a whole number (2 MHz / 48 kHz = 41.67).
+        // Each audio sample is held for floor or ceil of that ratio, carrying the
+        // fraction, so the average hold is exact. Truncating to 41 made every
+        // modulating frequency 1.6% high at 48 kHz (0.8% at 44.1 kHz).
+        let hold_ratio = RF_SAMPLE_RATE_HZ as f64 / self.audio_sample_rate as f64;
 
         // Buffer for writing to stdout (chunked for performance)
         let mut buffer = Vec::with_capacity(RF_BUFFER_CHUNK_SIZE * 2);
@@ -118,9 +124,12 @@ impl RfWorker {
                 if let Some(stdin) = child.stdin.as_mut() {
                     buffer.clear();
 
-                    let num_audio_steps = RF_BUFFER_CHUNK_SIZE / samples_per_audio_tick;
+                    // Fill one chunk of RF samples (2 bytes, I and Q, per sample).
+                    while buffer.len() < RF_BUFFER_CHUNK_SIZE * 2 {
+                        self.hold_accumulator += hold_ratio;
+                        let samples_per_audio_tick = self.hold_accumulator as usize;
+                        self.hold_accumulator -= samples_per_audio_tick as f64;
 
-                    for _ in 0..num_audio_steps {
                         let audio_val = self.synth.next_rf_sample(&params_copy);
 
                         // Apply waveform shaping based on RF pulse type

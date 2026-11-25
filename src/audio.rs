@@ -254,6 +254,7 @@ pub struct Synthesizer {
 
     // Tinnitus notched sound therapy
     pink: crate::dsp::PinkNoise,
+    breath_pink: crate::dsp::PinkNoise, // Separate filter state: Breath layer's own noise stream
     notch: crate::dsp::BandReject,
     last_notch_fc: f32,    // Cached to recompute notch coeffs only on change
     last_notch_width: f32,
@@ -284,6 +285,7 @@ impl Synthesizer {
             rng: SmallRng::from_os_rng(),
             phase_pitch_match: 0.0,
             pink: crate::dsp::PinkNoise::new(),
+            breath_pink: crate::dsp::PinkNoise::new(),
             notch: crate::dsp::BandReject::new(),
             last_notch_fc: -1.0,    // Force coefficient computation on first sample
             last_notch_width: -1.0,
@@ -459,7 +461,7 @@ impl Synthesizer {
                  noise * breath_env * breath_env
             },
             SignalType::WhiteNoise => noise,
-            SignalType::PinkNoise => noise * PINK_NOISE_FACTOR,
+            SignalType::PinkNoise => self.breath_pink.process(noise),
             SignalType::Sine => fast_sin(self.breath_phase), // LFO drone
             _ => noise
         };

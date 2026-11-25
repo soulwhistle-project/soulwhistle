@@ -71,9 +71,10 @@ pub const RF_BUFFER_CHUNK_SIZE: usize = 4096;
 /// Binaural beat frequency adjustment multiplier
 pub const BEAT_ADJUST_MULTIPLIER: f32 = 10.0;
 
-/// Binaural beat frequency range (Hz)
+/// Binaural beat frequency range (Hz). The top covers the 40 Hz gamma preset;
+/// at 30 Hz, adjusting that preset by one step clamped it down to 30 Hz.
 pub const BEAT_MIN_HZ: f32 = 0.1;
-pub const BEAT_MAX_HZ: f32 = 30.0;
+pub const BEAT_MAX_HZ: f32 = 50.0;
 
 /// Ping frequency coarse adjustment step (Hz)
 pub const PING_FREQ_COARSE_STEP: f32 = 1000.0;
@@ -178,8 +179,6 @@ pub const CHIRP_SWEEP_END_HZ: f32 = 3000.0;
 pub const BREATH_LFO_HZ: f32 = 0.2;
 
 // === Noise Reduction ===
-/// Pink noise approximation factor
-pub const PINK_NOISE_FACTOR: f32 = 0.8;
 
 // === Harmonic Mixing ===
 /// Harmonic 220Hz volume relative to carrier

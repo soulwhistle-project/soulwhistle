@@ -196,6 +196,8 @@ struct App {
 
     // WAV recording
     recording: Arc<Mutex<RecordingState>>,
+    // Output device sample rate, for the above-Nyquist warning on the ping layer
+    sample_rate: f32,
 }
 
 struct ChannelInfo {
@@ -293,6 +295,7 @@ impl App {
             current_preset: None,
             stream_client_count,
             recording,
+            sample_rate: 0.0,
         }
     }
 
@@ -1212,6 +1215,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let recording_for_exit = recording_state.clone();
     let mut app = App::new(params, stream_client_count_for_app, recording_state);
     app.current_preset = loaded_preset_name;
+    app.sample_rate = sample_rate;
     app.refresh_presets();
     
     let res = run_app(&mut terminal, app, error_rx, sample_rate as u32);
@@ -1874,8 +1878,16 @@ fn draw_mixer(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                     }
                 },
                 ChannelId::PingFreq => {
-                    format!("{:<40} {:.2}kHz (arrows to adjust)",
-                        chan.name, params.ping_freq_hz / 1000.0)
+                    // The synth mutes the ping above this limit (audio.rs), so say so
+                    // instead of letting an ultrasonic preset play silence unexplained.
+                    let limit = app.sample_rate * NYQUIST_SAFE_FRACTION;
+                    if app.sample_rate > 0.0 && params.ping_freq_hz > limit {
+                        format!("{:<40} {:.2}kHz MUTED: above {:.1}kHz limit at {:.1}kHz output (needs a higher sample rate)",
+                            chan.name, params.ping_freq_hz / 1000.0, limit / 1000.0, app.sample_rate / 1000.0)
+                    } else {
+                        format!("{:<40} {:.2}kHz (arrows to adjust)",
+                            chan.name, params.ping_freq_hz / 1000.0)
+                    }
                 },
                 ChannelId::TinnitusPitch => {
                     format!("{:<40} {:.0} Hz  [t] match tinnitus pitch",
