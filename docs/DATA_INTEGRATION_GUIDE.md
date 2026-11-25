@@ -451,8 +451,8 @@ Located in `/presets/`:
 - `DEFAULT_focus_12_expanded.json`
 - `DEFAULT_focus_15_no_time.json`
 - `DEFAULT_focus_21_bridge.json`
-- `DEFAULT_deep_focus_calm.json` (10 Hz alpha)
-- `DEFAULT_deep_focus_adhd.json` (14 Hz SMR)
+- `DEFAULT_deep_focus_adhd_alpha.json` (10 Hz alpha)
+- `DEFAULT_deep_focus_smr.json` (14 Hz SMR)
 - `DEFAULT_deep_focus_active.json` (18 Hz beta)
 - `DEFAULT_deep_focus_peak.json` (40 Hz gamma)
 

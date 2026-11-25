@@ -306,8 +306,8 @@ The Deep Focus suite provides four research-validated binaural beat presets opti
 - ✅ `presets/DEFAULT_focus_21_bridge.json`
 
 ### Deep Focus - ADHD Presets (JSON):
-- ✅ `presets/DEFAULT_deep_focus_calm.json` (10 Hz Alpha)
-- ✅ `presets/DEFAULT_deep_focus_adhd.json` (14 Hz SMR - PRIMARY)
+- ✅ `presets/DEFAULT_deep_focus_adhd_alpha.json` (10 Hz Alpha, ADHD primary)
+- ✅ `presets/DEFAULT_deep_focus_smr.json` (14 Hz SMR, experimental)
 - ✅ `presets/DEFAULT_deep_focus_active.json` (18 Hz Beta)
 - ✅ `presets/DEFAULT_deep_focus_peak.json` (40 Hz Gamma)
 

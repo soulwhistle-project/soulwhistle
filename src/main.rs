@@ -1046,8 +1046,31 @@ fn initialize_presets() -> std::io::Result<()> {
     for preset in embedded_presets::EMBEDDED_PRESETS {
         sync_builtin_preset(&presets_dir, preset.filename, preset.content)?;
     }
+    // Move aside copies of built-in presets that were renamed
+    for filename in embedded_presets::RETIRED_BUILTIN_PRESETS {
+        retire_builtin_preset(&presets_dir, filename)?;
+    }
 
     Ok(())
+}
+
+/// Unix time in seconds, for backup file names.
+fn unix_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Move a retired built-in preset aside as `<name>.bak-<unix time>`, which the
+/// preset list ignores. Returns true when a file was moved.
+fn retire_builtin_preset(dir: &std::path::Path, filename: &str) -> std::io::Result<bool> {
+    let path = dir.join(filename);
+    if !path.exists() {
+        return Ok(false);
+    }
+    std::fs::rename(&path, dir.join(format!("{}.bak-{}", filename, unix_secs())))?;
+    Ok(true)
 }
 
 /// Install a built-in (`DEFAULT_`) preset, or refresh it when this version of the
@@ -1061,11 +1084,7 @@ fn sync_builtin_preset(dir: &std::path::Path, filename: &str, content: &str) -> 
     match std::fs::read_to_string(&path) {
         Ok(existing) if existing == content => Ok(false),
         Ok(_) => {
-            let ts = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            std::fs::rename(&path, dir.join(format!("{}.bak-{}", filename, ts)))?;
+            std::fs::rename(&path, dir.join(format!("{}.bak-{}", filename, unix_secs())))?;
             std::fs::write(&path, content)?;
             Ok(true)
         }
@@ -2105,7 +2124,22 @@ mod preset_sync_tests {
         assert_eq!(backups.len(), 1);
         assert_eq!(std::fs::read_to_string(dir.join(&backups[0])).unwrap(), "v1");
         assert!(!backups[0].ends_with(".json"));
+
+        // Retired name: moved aside, and a second run does nothing.
+        let old = "DEFAULT_old.json";
+        std::fs::write(dir.join(old), "old").unwrap();
+        assert!(retire_builtin_preset(&dir, old).unwrap());
+        assert!(!dir.join(old).exists());
+        assert!(!retire_builtin_preset(&dir, old).unwrap());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn retired_names_are_not_shipped_again() {
+        for retired in embedded_presets::RETIRED_BUILTIN_PRESETS {
+            assert!(embedded_presets::EMBEDDED_PRESETS.iter().all(|p| p.filename != *retired),
+                "{retired} is both retired and shipped");
+        }
     }
 }
 

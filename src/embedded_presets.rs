@@ -16,12 +16,12 @@ pub const EMBEDDED_PRESETS: &[EmbeddedPreset] = &[
         content: include_str!("../presets/DEFAULT_deep_focus_active.json"),
     },
     EmbeddedPreset {
-        filename: "DEFAULT_deep_focus_adhd.json",
-        content: include_str!("../presets/DEFAULT_deep_focus_adhd.json"),
+        filename: "DEFAULT_deep_focus_smr.json",
+        content: include_str!("../presets/DEFAULT_deep_focus_smr.json"),
     },
     EmbeddedPreset {
-        filename: "DEFAULT_deep_focus_calm.json",
-        content: include_str!("../presets/DEFAULT_deep_focus_calm.json"),
+        filename: "DEFAULT_deep_focus_adhd_alpha.json",
+        content: include_str!("../presets/DEFAULT_deep_focus_adhd_alpha.json"),
     },
     EmbeddedPreset {
         filename: "DEFAULT_deep_focus_peak.json",
@@ -75,4 +75,13 @@ pub const EMBEDDED_PRESETS: &[EmbeddedPreset] = &[
         filename: "DEFAULT_uap_sweep_24khz.json",
         content: include_str!("../presets/DEFAULT_uap_sweep_24khz.json"),
     },
+];
+
+/// Built-in preset filenames used by earlier releases and since renamed. On startup
+/// a user's copy is moved aside as a backup, so it does not linger in the preset
+/// list next to its replacement.
+pub const RETIRED_BUILTIN_PRESETS: &[&str] = &[
+    // 0.3.1: names did not match the titles.
+    "DEFAULT_deep_focus_calm.json", // now DEFAULT_deep_focus_adhd_alpha.json (10 Hz alpha)
+    "DEFAULT_deep_focus_adhd.json", // now DEFAULT_deep_focus_smr.json (14 Hz SMR)
 ];
