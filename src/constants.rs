@@ -103,6 +103,13 @@ pub const PING_FREQ_MAX_HZ: f32 = 100000.0;
 /// (0.45 * fs leaves margin below the fold point at fs/2)
 pub const NYQUIST_SAFE_FRACTION: f32 = 0.45;
 
+/// Lowest output rate accepted on the command line. The highest fixed-range layer is
+/// the tinnitus pitch (up to 12 kHz), which needs more than 12 / 0.45 = 26.7 kHz.
+pub const SAMPLE_RATE_MIN_HZ: u32 = 32_000;
+
+/// Highest output rate accepted on the command line.
+pub const SAMPLE_RATE_MAX_HZ: u32 = 768_000;
+
 /// RF frequency adjustment step (100 kHz)
 pub const RF_FREQ_STEP_HZ: u64 = 100_000;
 
@@ -227,6 +234,9 @@ pub const STREAM_SYNC_SMOOTHING_S: f64 = 10.0;
 
 /// Bytes of stream between two ICY title blocks (the usual value for internet radio).
 pub const ICY_METAINT: usize = 16000;
+
+/// Bytes handed to the socket per write when streaming (flushed each time).
+pub const STREAM_WRITE_CHUNK: usize = 4096;
 
 /// Streaming server accept poll timeout (ms) — bounds shutdown latency when
 /// streaming is toggled off or the port changes

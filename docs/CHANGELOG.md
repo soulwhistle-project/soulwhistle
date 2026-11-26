@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The network stream answers HTTP/1.0 players at once, desktop VLC among them (VLC switches to HTTP/1.0 to ask for live titles). The stream response is now written directly: the HTTP library used to read the endless body into memory before answering such a player, so it never answered and kept using memory while connected
+- Loading a preset whose ping is above the output's limit shows a warning with the `--sample-rate` that would play it
+- `--sample-rate` accepts 32 kHz to 768 kHz (the 12 kHz tinnitus pitch needs more than 26.7 kHz)
+- Gamma 40 Hz Pulses: the description gives the levels and daily duration from Martorell et al. 2019 and the human pilot of Chan et al. 2022 (PLoS ONE), with what it did and did not find
 - FLAC network stream: `/stream.flac` (24-bit) and `?fmt=flac16`, lossless at about half the bandwidth of WAV, encoded per listener with the pure-Rust `flacenc` crate, tagged with the preset title
 - The streaming panel shows this machine's address and both stream links instead of `<ip>`
 - Live title updates on the network stream (ICY metadata): players show the new preset's name after a preset change without reconnecting

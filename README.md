@@ -101,6 +101,8 @@ soulwhistle --device pipewire --sample-rate 192000
 
 `--device` takes any part of a name or id from the list. A higher rate is what lets ultrasonic layers (the ping above about 20 kHz) be generated at all: at 48 kHz anything above 21.6 kHz is muted, at 96 kHz the limit is 43.2 kHz, at 192 kHz 86.4 kHz. Through PipeWire or PulseAudio the synth runs at the rate asked for, and the recording and network stream carry it in full; whether it also reaches the speakers depends on the sound card, since many laptop codecs stop at 48 kHz and the sound server resamples down to them.
 
+Rates from 32 kHz to 768 kHz are accepted. Loading a preset whose ping is above the limit of the running rate shows a warning with the rate that would play it.
+
 ## Research Presets
 
 Soulwhistle includes presets based on peer-reviewed research and established protocols. Experimental presets (clearly marked with `[EXPERIMENTAL]` in the UI) are exploratory and not peer-reviewed.
@@ -208,8 +210,8 @@ Add `?fmt=` to the URL:
 | `/stream.wav` | 16-bit PCM with TPDF dither (default) | Every player and browser |
 | `/stream.wav?fmt=s24` | 24-bit PCM with TPDF dither | VLC, mpv, ffplay, Chrome |
 | `/stream.wav?fmt=f32` | 32-bit float, exact copy of the synth output (bit-exact with `&sync=off`) | VLC, mpv, ffplay, Chrome |
-| `/stream.flac` | FLAC, 24-bit with TPDF dither, about half the bandwidth of WAV | mpv, ffplay, VLC on Android (tested); browsers not yet tested |
-| `/stream.flac?fmt=flac16` | FLAC, 16-bit with TPDF dither | mpv, ffplay, VLC on Android (tested); browsers not yet tested |
+| `/stream.flac` | FLAC, 24-bit with TPDF dither, about half the bandwidth of WAV | VLC (desktop and Android), mpv, ffplay, Firefox, Chromium browsers (tested in Brave) |
+| `/stream.flac?fmt=flac16` | FLAC, 16-bit with TPDF dither | VLC (desktop and Android), mpv, ffplay, Firefox, Chromium browsers (tested in Brave) |
 
 All formats are lossless, stereo and at the synth's sample rate (see `--sample-rate` above). FLAC is encoded on each listener's own thread, never in the audio thread, in blocks of 4096 samples, which adds about 85 ms of latency at 48 kHz. FLAC carries integers only, so there is no float FLAC. The FLAC stream is tagged with the preset title, which players show when they connect. Lossy codecs (MP3, AAC, Opus, Bluetooth) are deliberately not offered: they cut content above about 20 kHz and blur the small left/right differences binaural beats rely on.
 
@@ -229,7 +231,7 @@ These work through the operating system, with no change to Soulwhistle:
 - **AirPlay (Linux, PipeWire)**: load PipeWire's `libpipewire-module-raop-discover` module and AirPlay speakers appear as outputs; select one as the default output before starting Soulwhistle. AirPlay carries 44.1 kHz/16-bit only, so ultrasonic content is lost, and it adds 1 to 2 s of latency. See the [PipeWire RAOP documentation](https://docs.pipewire.org/page_module_raop_discover.html).
 - **Lossless multi-room**: [Snapcast](https://github.com/badaix/snapcast) (synchronised, FLAC or PCM) or PipeWire's RTP and ROC network modules.
 
-**Help Wanted**: a FLAC endpoint, a selectable device sample rate (96/192 kHz) for ultrasonic streaming, and direct Snapcast output.
+**Help Wanted**: direct Snapcast output.
 
 ## Architecture
 

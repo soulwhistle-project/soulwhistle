@@ -1,5 +1,6 @@
 use parking_lot::Mutex;
 use std::collections::VecDeque;
+use std::io::{Read, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
@@ -259,38 +260,55 @@ fn handle_stream_request(
 
     // Header for an endless stream
     let (header, content_type) = if format.is_flac() {
-        (create_flac_header(sample_rate, format, title_for_header)?, &b"audio/flac"[..])
+        (create_flac_header(sample_rate, format, title_for_header)?, "audio/flac")
     } else {
-        (create_wav_header(sample_rate, format), &b"audio/wav"[..])
+        (create_wav_header(sample_rate, format), "audio/wav")
     };
 
     // Create a streaming reader, starting near live
     let stream_reader = AudioStreamReader::new(buffer, Some(header), format, sync);
 
-    let mut headers = vec![
-        tiny_http::Header::from_bytes(&b"Content-Type"[..], content_type).unwrap(),
-        tiny_http::Header::from_bytes(&b"Cache-Control"[..], &b"no-cache"[..]).unwrap(),
-        tiny_http::Header::from_bytes(&b"icy-name"[..], &b"Soulwhistle"[..]).unwrap(),
-    ];
-    let body: Box<dyn std::io::Read + Send> = if wants_icy {
-        headers.push(tiny_http::Header::from_bytes(
-            &b"icy-metaint"[..], ICY_METAINT.to_string().as_bytes()).unwrap());
+    let mut body: Box<dyn Read + Send> = if wants_icy {
         Box::new(IcyReader::new(stream_reader, title))
     } else {
         Box::new(stream_reader)
     };
 
-    let response = tiny_http::Response::new(
-        tiny_http::StatusCode(200),
-        headers,
-        body,
-        None, // Unknown length (infinite stream)
-        None,
-    );
+    // The response is written by hand, Icecast style: headers, then the body until the
+    // listener hangs up, with no length and no chunking. tiny_http's own response path
+    // reads the whole body into memory before answering an HTTP/1.0 client (it needs a
+    // Content-Length), which on an endless stream never answers and grows without
+    // bound. VLC asks for ICY titles over HTTP/1.0, so this matters in practice.
+    let http10 = *request.http_version() <= (1, 0);
+    let head = stream_response_head(http10, content_type, wants_icy);
+    let mut out = request.into_writer();
+    out.write_all(head.as_bytes())?;
+    out.flush()?;
 
-    request.respond(response)?;
+    let mut chunk = vec![0u8; STREAM_WRITE_CHUNK];
+    loop {
+        let n = body.read(&mut chunk)?;
+        if n == 0 {
+            return Ok(());
+        }
+        // A write error means the listener disconnected: that is the normal end.
+        if out.write_all(&chunk[..n]).and_then(|_| out.flush()).is_err() {
+            return Ok(());
+        }
+    }
+}
 
-    Ok(())
+/// Status line and headers of a stream response. The body is delimited by the
+/// connection closing, which HTTP/1.0 and HTTP/1.1 both allow.
+fn stream_response_head(http10: bool, content_type: &str, icy: bool) -> String {
+    let mut head = format!(
+        "{} 200 OK\r\nContent-Type: {}\r\nCache-Control: no-cache\r\nConnection: close\r\nicy-name: Soulwhistle\r\n",
+        if http10 { "HTTP/1.0" } else { "HTTP/1.1" }, content_type);
+    if icy {
+        head.push_str(&format!("icy-metaint: {}\r\n", ICY_METAINT));
+    }
+    head.push_str("\r\n");
+    head
 }
 
 /// Sample format of the HTTP stream, chosen with `?fmt=` on the stream URL.
@@ -970,6 +988,58 @@ mod tests {
 
     /// Reads with any buffer size, down to one byte, give the same byte stream:
     /// players and the ICY wrapper may ask for less than one sample frame.
+    /// A real server answers HTTP/1.0 and HTTP/1.1 listeners at once, with ICY when
+    /// asked. tiny_http's own response path never answered HTTP/1.0 on an endless
+    /// stream (it buffers the body to learn its length), which broke VLC's ICY client.
+    #[test]
+    fn server_answers_http10_and_http11_listeners() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::net::TcpStream;
+
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let mut p = AudioParams::default();
+        p.stream_enabled = true;
+        p.stream_port = port;
+        let params = Arc::new(Mutex::new(p));
+        let server = StreamingServer::new(buffer_with(48000), port, Arc::new(Mutex::new(0)), params.clone());
+        std::thread::spawn(move || server.run());
+
+        let fetch = |request: &str| -> (Vec<String>, Vec<u8>) {
+            let mut conn = None;
+            for _ in 0..50 {
+                if let Ok(c) = TcpStream::connect(("127.0.0.1", port)) { conn = Some(c); break; }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let mut conn = conn.expect("server did not start");
+            conn.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            conn.write_all(request.as_bytes()).unwrap();
+            let mut r = BufReader::new(conn);
+            let mut lines = Vec::new();
+            loop {
+                let mut line = String::new();
+                r.read_line(&mut line).expect("no response headers within 3 s");
+                if line == "\r\n" || line.is_empty() { break; }
+                lines.push(line.trim_end().to_string());
+            }
+            let mut magic = vec![0u8; 4];
+            r.read_exact(&mut magic).unwrap();
+            (lines, magic)
+        };
+
+        let (head, magic) = fetch("GET /stream.flac HTTP/1.0\r\nIcy-MetaData: 1\r\n\r\n");
+        assert_eq!(head[0], "HTTP/1.0 200 OK");
+        assert!(head.iter().any(|h| h == &format!("icy-metaint: {ICY_METAINT}")), "{head:?}");
+        assert_eq!(&magic, b"fLaC");
+
+        let (head, magic) = fetch("GET /stream.wav HTTP/1.1\r\nHost: x\r\n\r\n");
+        assert_eq!(head[0], "HTTP/1.1 200 OK");
+        assert!(head.iter().any(|h| h == "Content-Type: audio/wav"), "{head:?}");
+        assert!(!head.iter().any(|h| h.starts_with("icy-metaint")), "{head:?}");
+        assert_eq!(&magic, b"RIFF");
+
+        params.lock().stream_enabled = false;
+    }
+
     #[test]
     fn tiny_reads_never_end_the_stream() {
         let b = buffer_with(4800);

@@ -412,10 +412,14 @@ impl App {
                             loaded.stream_port = stream_port;
                             loaded.preset_version = current_version.wrapping_add(1);
 
+                            let warning = ping_rate_warning(&loaded, self.sample_rate);
                             *params = loaded;
                             drop(params);
 
                             self.current_preset = Some(filename.clone());
+                            if let Some(w) = warning {
+                                self.status_msg = Some((w, std::time::Instant::now()));
+                            }
                             return;
                         }
                     }
@@ -840,13 +844,15 @@ impl App {
                         loaded.stream_port = stream_port;
                         loaded.preset_version = current_version.wrapping_add(1);
 
+                        let warning = ping_rate_warning(&loaded, self.sample_rate);
                         *params = loaded;
                         drop(params);
 
                         // Store preset name
                         self.current_preset = Some(filename.clone());
 
-                        self.status_msg = Some((format!("Loaded {}", filename), std::time::Instant::now()));
+                        let msg = warning.unwrap_or_else(|| format!("Loaded {}", filename));
+                        self.status_msg = Some((msg, std::time::Instant::now()));
                         self.exit_preset_mode();
                         return;
                     }
@@ -1102,8 +1108,8 @@ fn parse_cli(args: impl Iterator<Item = String>) -> Result<CliOptions, String> {
             "--sample-rate" => {
                 let v = value("a rate in Hz, e.g. 96000")?;
                 let hz: u32 = v.parse().map_err(|_| format!("--sample-rate: '{v}' is not a number of Hz"))?;
-                if !(8000..=768_000).contains(&hz) {
-                    return Err(format!("--sample-rate: {hz} Hz is outside 8000 to 768000"));
+                if !(SAMPLE_RATE_MIN_HZ..=SAMPLE_RATE_MAX_HZ).contains(&hz) {
+                    return Err(format!("--sample-rate: {hz} Hz is outside {SAMPLE_RATE_MIN_HZ} to {SAMPLE_RATE_MAX_HZ}"));
                 }
                 opts.sample_rate = Some(hz);
             }
@@ -1156,7 +1162,7 @@ fn list_output_devices(host: &cpal::Host) {
             }
             if hi == 0 {
                 println!("      accepts: no stereo format the synth can use");
-            } else if hi > 768_000 {
+            } else if hi > SAMPLE_RATE_MAX_HZ {
                 println!("      accepts: any rate ({})", formats.join(", "));
             } else {
                 println!("      accepts: {lo} to {hi} Hz ({})", formats.join(", "));
@@ -1255,6 +1261,27 @@ fn sync_builtin_preset(dir: &std::path::Path, filename: &str, content: &str) -> 
             Ok(true)
         }
     }
+}
+
+/// Output rates to suggest when a preset needs more than the device runs at.
+const SUGGESTED_SAMPLE_RATES: [u32; 4] = [96_000, 192_000, 384_000, 768_000];
+
+/// When a preset's ping is above what the output can reproduce, the synth mutes it
+/// (audio.rs). Say so on load, with the rate that would play it, instead of leaving
+/// an audible-on-paper layer silent without explanation.
+fn ping_rate_warning(params: &AudioParams, sample_rate: f32) -> Option<String> {
+    let limit = sample_rate * NYQUIST_SAFE_FRACTION;
+    if sample_rate <= 0.0 || params.ping_vol <= 0.0 || params.lock_signal_layer
+        || params.ping_freq_hz <= limit {
+        return None;
+    }
+    let needed = SUGGESTED_SAMPLE_RATES.iter()
+        .find(|&&r| params.ping_freq_hz <= r as f32 * NYQUIST_SAFE_FRACTION)
+        .copied()
+        .unwrap_or(SAMPLE_RATE_MAX_HZ);
+    Some(format!(
+        "⚠️ Ping {:.1} kHz is muted at {:.1} kHz output: start with --sample-rate {} (and a device that supports it)",
+        params.ping_freq_hz / 1000.0, sample_rate / 1000.0, needed))
 }
 
 /// Load preset from user directory or embedded fallback
@@ -2387,6 +2414,28 @@ mod cli_tests {
         assert!(parse(&["-h"]).unwrap().help);
         assert!(parse(&["--sample-rate", "fast"]).is_err());
         assert!(parse(&["--sample-rate", "1000"]).is_err());
+        assert!(parse(&["--sample-rate", "16000"]).is_err());
+        assert!(parse(&["--sample-rate", "32000"]).is_ok());
+    }
+
+    #[test]
+    fn muted_ping_is_reported_on_preset_load() {
+        let mut p = AudioParams::default();
+        p.ping_vol = 0.3;
+        p.lock_signal_layer = false;
+        p.ping_freq_hz = 40_000.0;
+        let w = ping_rate_warning(&p, 48_000.0).expect("40 kHz cannot play at 48 kHz");
+        assert!(w.contains("--sample-rate 96000"), "{w}");
+        p.ping_freq_hz = 60_000.0;
+        assert!(ping_rate_warning(&p, 48_000.0).unwrap().contains("--sample-rate 192000"));
+        // Plays fine, silent anyway, or not known yet: nothing to say.
+        assert!(ping_rate_warning(&p, 192_000.0).is_none());
+        p.ping_freq_hz = 10_000.0;
+        assert!(ping_rate_warning(&p, 48_000.0).is_none());
+        p.ping_freq_hz = 40_000.0;
+        assert!(ping_rate_warning(&p, 0.0).is_none());
+        p.ping_vol = 0.0;
+        assert!(ping_rate_warning(&p, 48_000.0).is_none());
         assert!(parse(&["--device"]).is_err());
         assert!(parse(&["--volume", "3"]).is_err());
     }

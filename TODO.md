@@ -21,20 +21,19 @@ A primary goal is to support piezoelectric transducers for ultrasonic audio rese
 - ✅ Frequency range supports up to 100 kHz (software ready)
 - ✅ `--sample-rate` and `--device` (with `--list-devices`) choose the synth rate and output; the rate is shown in the header
 - ✅ The ping layer is muted above 0.45 × sample rate and the UI says so (since 0.3.0)
-- ⚠️ No warning yet for other layers or for presets loaded with out-of-range values
+- ✅ Loading a preset whose ping is out of range shows a warning with the rate that would play it. The other layers have fixed or bounded frequencies (tinnitus pitch up to 12 kHz), and `--sample-rate` starts at 32 kHz so they always fit
 
 **Pull requests for piezo transducer integration are highly encouraged!**
 
 ## True 40 Hz Auditory Stimulation
 
-Done: the ping layer has a `GammaPulse` type, and the "Gamma 40 Hz Pulses" preset reproduces the Martorell et al. 2019 stimulus (1 ms tones at 10 kHz, 40 per second, both ears). Still open:
+Done: the ping layer has a `GammaPulse` type, and the "Gamma 40 Hz Pulses" preset reproduces the Martorell et al. 2019 stimulus (1 ms tones at 10 kHz, 40 per second, both ears). Its description gives the levels from the papers' methods (Martorell 2019: 60 dB, 1 h/day for 7 days, measurement not stated; Chan et al. 2022: 68 dB for patients, 1 h/day). Still open:
 
-- Check the listening level used in Martorell 2019 (secondary sources say 60 dB) and Chan et al. 2022 (40 Hz clicks) against the papers' methods, then add both to the preset text if confirmed.
 - Optional soft (raised-cosine) edges for the bursts, as a comfort setting.
 
 ## Network Streaming (Improvements)
 
-- ✅ **FLAC endpoint** (`/stream.flac`, `?fmt=flac16`): done. Checked with the reference `flac` decoder (sample-exact test), ffprobe, mpv and VLC on Android. Still to check: desktop VLC, Chrome and Firefox. Live title updates are sent as ICY metadata (checked with mpv; to check on VLC Android).
+- ✅ **FLAC endpoint** (`/stream.flac`, `?fmt=flac16`): done. Checked with the reference `flac` decoder (sample-exact test), ffprobe, mpv, VLC on Android and desktop, Firefox and Brave (headless, 20 s each). Live title updates are sent as ICY metadata (checked with mpv, desktop VLC and VLC on Android).
 - ✅ **Clock drift**: each listener is resampled by at most 0.05 % to stay about 200 ms behind live (`?sync=off` disables it). Tested on a model of the stream (6 simulated hours, -300 to +300 ppm); still to confirm over a real multi-hour session.
 - ✅ **Sample rate choice**: `--sample-rate 96000` or `192000` (see piezo section above).
 
