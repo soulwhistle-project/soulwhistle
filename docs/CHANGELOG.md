@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.3.1 (2026-11-26)
 
 - The network stream answers HTTP/1.0 players at once, desktop VLC among them (VLC switches to HTTP/1.0 to ask for live titles). The stream response is now written directly: the HTTP library used to read the endless body into memory before answering such a player, so it never answered and kept using memory while connected
 - Loading a preset whose ping is above the output's limit shows a warning with the `--sample-rate` that would play it
