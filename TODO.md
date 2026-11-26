@@ -19,7 +19,7 @@ A primary goal is to support piezoelectric transducers for ultrasonic audio rese
 
 **Current Status:**
 - ✅ Frequency range supports up to 100 kHz (software ready)
-- ⚠️ No sample rate override or audio device selection (the synth always runs at the default device's rate; this is the main blocker)
+- ✅ `--sample-rate` and `--device` (with `--list-devices`) choose the synth rate and output; the rate is shown in the header
 - ✅ The ping layer is muted above 0.45 × sample rate and the UI says so (since 0.3.0)
 - ⚠️ No warning yet for other layers or for presets loaded with out-of-range values
 
@@ -34,9 +34,9 @@ Done: the ping layer has a `GammaPulse` type, and the "Gamma 40 Hz Pulses" prese
 
 ## Network Streaming (Improvements)
 
-- ✅ **FLAC endpoint** (`/stream.flac`, `?fmt=flac16`): done. Checked with the reference `flac` decoder (sample-exact test), ffprobe, mpv and VLC on Android. Still to check: desktop VLC, Chrome and Firefox. Possible next step: live title updates after a preset change (tags are only read on connect).
-- **Clock drift**: the laptop's and the listener's sound cards run at slightly different speeds, so over many hours a slower listener falls 2 s behind and skips ahead with a click. Fixing it needs adaptive resampling on the reader side.
-- **Sample rate choice**: ultrasonic layers only stream if the device runs at 96 or 192 kHz (see piezo section above).
+- ✅ **FLAC endpoint** (`/stream.flac`, `?fmt=flac16`): done. Checked with the reference `flac` decoder (sample-exact test), ffprobe, mpv and VLC on Android. Still to check: desktop VLC, Chrome and Firefox. Live title updates are sent as ICY metadata (checked with mpv; to check on VLC Android).
+- ✅ **Clock drift**: each listener is resampled by at most 0.05 % to stay about 200 ms behind live (`?sync=off` disables it). Tested on a model of the stream (6 simulated hours, -300 to +300 ppm); still to confirm over a real multi-hour session.
+- ✅ **Sample rate choice**: `--sample-rate 96000` or `192000` (see piezo section above).
 
 ## OpenBCI Integration (Planned)
 

@@ -1062,6 +1062,150 @@ fn initialize_presets() -> std::io::Result<()> {
 }
 
 /// Unix time in seconds, for backup file names.
+const CLI_USAGE: &str = "\
+Usage: soulwhistle [options]
+
+Options:
+  --list-devices        List audio outputs and the sample rates each accepts, then exit
+  --device <name>       Play on the output whose name or id contains <name> (case ignored)
+  --sample-rate <hz>    Run the synth at <hz>, e.g. 96000 or 192000, so ultrasonic
+                        layers can be played and streamed (default: the output's own rate)
+  -h, --help            Show this help
+
+Environment:
+  SOULWHISTLE_BUFFER_FRAMES   Audio buffer size in frames (for Bluetooth or troubleshooting)";
+
+#[derive(Debug, Default, PartialEq)]
+struct CliOptions {
+    device: Option<String>,
+    sample_rate: Option<u32>,
+    list_devices: bool,
+    help: bool,
+}
+
+/// Parse the command line (three options: no argument-parsing dependency needed).
+fn parse_cli(args: impl Iterator<Item = String>) -> Result<CliOptions, String> {
+    let mut opts = CliOptions::default();
+    let mut args = args.peekable();
+    while let Some(arg) = args.next() {
+        let (name, inline) = match arg.split_once('=') {
+            Some((n, v)) if n.starts_with("--") => (n.to_string(), Some(v.to_string())),
+            _ => (arg.clone(), None),
+        };
+        let mut value = |what: &str| {
+            inline.clone().or_else(|| args.next())
+                .ok_or_else(|| format!("{name} needs a value ({what})"))
+        };
+        match name.as_str() {
+            "--list-devices" => opts.list_devices = true,
+            "--device" => opts.device = Some(value("part of a device name")?),
+            "--sample-rate" => {
+                let v = value("a rate in Hz, e.g. 96000")?;
+                let hz: u32 = v.parse().map_err(|_| format!("--sample-rate: '{v}' is not a number of Hz"))?;
+                if !(8000..=768_000).contains(&hz) {
+                    return Err(format!("--sample-rate: {hz} Hz is outside 8000 to 768000"));
+                }
+                opts.sample_rate = Some(hz);
+            }
+            "-h" | "--help" => opts.help = true,
+            other => return Err(format!("Unknown option '{other}'")),
+        }
+    }
+    Ok(opts)
+}
+
+fn device_label(device: &cpal::Device) -> (String, String) {
+    let name = device.description().map(|d| d.name().to_string()).unwrap_or_else(|_| "?".to_string());
+    let id = device.id().map(|i| i.to_string()).unwrap_or_default();
+    (name, id)
+}
+
+/// Print every output device with the sample rates and formats it accepts.
+fn list_output_devices(host: &cpal::Host) {
+    let default_id = host.default_output_device().and_then(|d| d.id().ok());
+    let devices = match host.output_devices() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("Could not list audio outputs: {e}");
+            return;
+        }
+    };
+    for device in devices {
+        let (name, id) = device_label(&device);
+        let is_default = default_id.is_some() && device.id().ok() == default_id;
+        println!("{}{name}", if is_default { "* " } else { "  " });
+        if !id.is_empty() {
+            println!("      id: {id}");
+        }
+        if let Ok(c) = device.default_output_config() {
+            println!("      default: {} Hz, {} channels, {:?}", c.sample_rate(), c.channels(), c.sample_format());
+        }
+        // One summary line: the stereo-capable rate range in formats the synth writes.
+        if let Ok(configs) = device.supported_output_configs() {
+            let mut lo = u32::MAX;
+            let mut hi = 0;
+            let mut formats: Vec<String> = Vec::new();
+            for c in configs.filter(|c| c.channels() >= 2 && matches!(c.sample_format(),
+                cpal::SampleFormat::F32 | cpal::SampleFormat::I16 | cpal::SampleFormat::U16)) {
+                lo = lo.min(c.min_sample_rate());
+                hi = hi.max(c.max_sample_rate());
+                let f = format!("{:?}", c.sample_format()).to_lowercase();
+                if !formats.contains(&f) {
+                    formats.push(f);
+                }
+            }
+            if hi == 0 {
+                println!("      accepts: no stereo format the synth can use");
+            } else if hi > 768_000 {
+                println!("      accepts: any rate ({})", formats.join(", "));
+            } else {
+                println!("      accepts: {lo} to {hi} Hz ({})", formats.join(", "));
+            }
+        }
+    }
+    println!("\n* = default output. Use --device <part of the name or id> and --sample-rate <hz>.");
+}
+
+/// The default output, or the first whose name or id contains `wanted` (case ignored).
+fn select_output_device(host: &cpal::Host, wanted: Option<&str>) -> Result<cpal::Device, String> {
+    let Some(wanted) = wanted else {
+        return host.default_output_device().ok_or_else(|| "No audio output found".to_string());
+    };
+    let needle = wanted.to_lowercase();
+    let devices = host.output_devices().map_err(|e| format!("Could not list audio outputs: {e}"))?;
+    for device in devices {
+        let (name, id) = device_label(&device);
+        if name.to_lowercase().contains(&needle) || id.to_lowercase().contains(&needle) {
+            return Ok(device);
+        }
+    }
+    Err(format!("No audio output matches '{wanted}'. Run soulwhistle --list-devices to see them."))
+}
+
+/// The device's default configuration, or one at `rate` Hz. Prefers stereo, then
+/// 32-bit float, then the device's default sample format, among the formats the
+/// synth can write (f32, i16, u16).
+fn select_output_config(device: &cpal::Device, rate: Option<u32>) -> Result<cpal::SupportedStreamConfig, String> {
+    let default = device.default_output_config()
+        .map_err(|e| format!("Audio output has no usable configuration: {e}"))?;
+    let Some(rate) = rate else { return Ok(default) };
+    let usable = |f: cpal::SampleFormat| matches!(f, cpal::SampleFormat::F32 | cpal::SampleFormat::I16 | cpal::SampleFormat::U16);
+    let mut ranges: Vec<_> = device.supported_output_configs()
+        .map_err(|e| format!("Could not read the output's sample rates: {e}"))?
+        .filter(|c| usable(c.sample_format()) && c.channels() >= 2
+            && c.min_sample_rate() <= rate && rate <= c.max_sample_rate())
+        .collect();
+    ranges.sort_by_key(|c| (
+        c.channels() != 2,
+        c.sample_format() != cpal::SampleFormat::F32,
+        c.sample_format() != default.sample_format(),
+    ));
+    ranges.into_iter().next()
+        .map(|c| c.with_sample_rate(rate))
+        .ok_or_else(|| format!(
+            "This output does not accept {rate} Hz. Run soulwhistle --list-devices to see the rates it does."))
+}
+
 /// This machine's address on the local network, for the stream URLs. A UDP socket
 /// "connected" to a reserved documentation address (192.0.2.1, TEST-NET-1) sends
 /// nothing: connect() only asks the OS which local address it would route from.
@@ -1134,13 +1278,41 @@ fn load_preset_hybrid(filename: &str) -> Option<String> {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    // Initialize presets directory and copy embedded presets on first run
-    let _ = initialize_presets();
+    let cli = match parse_cli(std::env::args().skip(1)) {
+        Ok(c) => c,
+        Err(msg) => {
+            eprintln!("{msg}\n\n{CLI_USAGE}");
+            std::process::exit(2);
+        }
+    };
+    if cli.help {
+        println!("{CLI_USAGE}");
+        return Ok(());
+    }
 
     // 1. Audio Setup
     let host = cpal::default_host();
-    let device = host.default_output_device().expect("no output device available");
-    let supported_config = device.default_output_config()?;
+    if cli.list_devices {
+        list_output_devices(&host);
+        return Ok(());
+    }
+    // Initialize presets directory and copy embedded presets on first run
+    let _ = initialize_presets();
+
+    let device = match select_output_device(&host, cli.device.as_deref()) {
+        Ok(d) => d,
+        Err(msg) => {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+    };
+    let supported_config = match select_output_config(&device, cli.sample_rate) {
+        Ok(c) => c,
+        Err(msg) => {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+    };
     let sample_rate = supported_config.sample_rate() as f32;
 
     // Request explicit buffer size (env override for Bluetooth/troubleshooting)
@@ -1793,6 +1965,7 @@ fn draw_mixer(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
             Span::raw("         "),
             Span::styled(" ■ ON AIR ■ ", on_air_style),
             Span::raw("  Multi-Dimensional Communication System"),
+            Span::styled(format!("   {} Hz", app.sample_rate as u32), Style::default().fg(Color::DarkGray)),
         ]),
     ];
     let header = Paragraph::new(header_lines)
@@ -2193,5 +2366,28 @@ mod recording_tests {
         // Both buffers came back to the pool for reuse.
         assert_eq!(pool_rx.try_iter().count(), 2);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<CliOptions, String> {
+        parse_cli(args.iter().map(|s| s.to_string()))
+    }
+
+    #[test]
+    fn options_are_parsed() {
+        assert_eq!(parse(&[]).unwrap(), CliOptions::default());
+        let o = parse(&["--device", "USB", "--sample-rate=96000"]).unwrap();
+        assert_eq!(o.device.as_deref(), Some("USB"));
+        assert_eq!(o.sample_rate, Some(96000));
+        assert!(parse(&["--list-devices"]).unwrap().list_devices);
+        assert!(parse(&["-h"]).unwrap().help);
+        assert!(parse(&["--sample-rate", "fast"]).is_err());
+        assert!(parse(&["--sample-rate", "1000"]).is_err());
+        assert!(parse(&["--device"]).is_err());
+        assert!(parse(&["--volume", "3"]).is_err());
     }
 }

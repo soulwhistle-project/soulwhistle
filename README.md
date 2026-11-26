@@ -89,6 +89,18 @@ Presets are automatically installed to:
 
 Recordings are saved as `rec_<timestamp>.wav` in a `recordings` folder next to the presets folder.
 
+### Audio output and sample rate
+
+By default Soulwhistle plays on the system's default output at that output's own sample rate, shown at the top right of the screen. To choose:
+
+```bash
+soulwhistle --list-devices                 # outputs, and the rates each accepts
+soulwhistle --sample-rate 96000            # run the synth at 96 kHz
+soulwhistle --device pipewire --sample-rate 192000
+```
+
+`--device` takes any part of a name or id from the list. A higher rate is what lets ultrasonic layers (the ping above about 20 kHz) be generated at all: at 48 kHz anything above 21.6 kHz is muted, at 96 kHz the limit is 43.2 kHz, at 192 kHz 86.4 kHz. Through PipeWire or PulseAudio the synth runs at the rate asked for, and the recording and network stream carry it in full; whether it also reaches the speakers depends on the sound card, since many laptop codecs stop at 48 kHz and the sound server resamples down to them.
+
 ## Research Presets
 
 Soulwhistle includes presets based on peer-reviewed research and established protocols. Experimental presets (clearly marked with `[EXPERIMENTAL]` in the UI) are exploratory and not peer-reviewed.
@@ -195,18 +207,20 @@ Add `?fmt=` to the URL:
 |-----|--------|----------|
 | `/stream.wav` | 16-bit PCM with TPDF dither (default) | Every player and browser |
 | `/stream.wav?fmt=s24` | 24-bit PCM with TPDF dither | VLC, mpv, ffplay, Chrome |
-| `/stream.wav?fmt=f32` | 32-bit float, bit-exact copy of the synth output | VLC, mpv, ffplay, Chrome |
+| `/stream.wav?fmt=f32` | 32-bit float, exact copy of the synth output (bit-exact with `&sync=off`) | VLC, mpv, ffplay, Chrome |
 | `/stream.flac` | FLAC, 24-bit with TPDF dither, about half the bandwidth of WAV | mpv, ffplay, VLC on Android (tested); browsers not yet tested |
 | `/stream.flac?fmt=flac16` | FLAC, 16-bit with TPDF dither | mpv, ffplay, VLC on Android (tested); browsers not yet tested |
 
-All formats are lossless, stereo and at the output device's native sample rate. FLAC is encoded on each listener's own thread, never in the audio thread, in blocks of 4096 samples, which adds about 85 ms of latency at 48 kHz. FLAC carries integers only, so there is no float FLAC. The FLAC stream is tagged with the preset title, which players show when they connect; after a preset change the audio switches at once, but the title only updates when the player reconnects. Lossy codecs (MP3, AAC, Opus, Bluetooth) are deliberately not offered: they cut content above about 20 kHz and blur the small left/right differences binaural beats rely on.
+All formats are lossless, stereo and at the synth's sample rate (see `--sample-rate` above). FLAC is encoded on each listener's own thread, never in the audio thread, in blocks of 4096 samples, which adds about 85 ms of latency at 48 kHz. FLAC carries integers only, so there is no float FLAC. The FLAC stream is tagged with the preset title, which players show when they connect. Lossy codecs (MP3, AAC, Opus, Bluetooth) are deliberately not offered: they cut content above about 20 kHz and blur the small left/right differences binaural beats rely on.
 
 ### How the stream behaves
 
 - New listeners start about 200 ms behind live.
 - Changing preset keeps the connection open: listeners jump straight to the new preset's audio.
-- A listener that falls more than 2 s behind skips ahead to stay live.
-- Ultrasonic layers only reach the listener if the listening device's sound card runs at a high enough sample rate.
+- The current preset's title is sent as ICY metadata (the internet radio standard) to players that ask for it, so VLC, mpv and ffmpeg show the new title after a preset change without reconnecting.
+- Clock correction: two sound cards never run at exactly the same speed (they differ by around 10 to 100 parts per million), so over hours a listener would drift up to 2 s behind and then skip ahead with a click, or run its own buffer dry. Each listener's stream is resampled very slightly (at most 0.05 %, far below an audible pitch change) to hold it about 200 ms behind live. The interpolator is a 96-tap windowed sinc, flat up to the synth's own frequency limit. Add `sync=off` to the URL (`?sync=off`, or `&sync=off` after `fmt=`) to get the samples exactly as generated, without correction.
+- If a listener still falls more than 2 s behind (a stalled network, for example), it skips ahead to stay live.
+- Ultrasonic layers reach the listener only if the synth runs at a high enough sample rate (`--sample-rate`) and the listening device's sound card can play them.
 
 ### AirPlay and multi-room
 

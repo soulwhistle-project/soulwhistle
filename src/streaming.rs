@@ -97,7 +97,9 @@ impl AudioRingBuffer {
     /// index), so it stays correct as the producer rotates the deque via `pop_front`.
     /// If the reader has fallen further behind than the buffer holds, it is
     /// fast-forwarded to the oldest available sample (dropping the gap) to stay live.
-    pub fn read_samples(&self, position: &mut u64, count: usize) -> Vec<(f32, f32)> {
+    /// Also returns how many samples remain unread after this read (how far
+    /// behind live the reader is), measured under the same lock.
+    pub fn read_samples_lag(&self, position: &mut u64, count: usize) -> (Vec<(f32, f32)>, u64) {
         let st = self.state.lock();
         let len = st.samples.len() as u64;
         let write_count = st.write_count;
@@ -110,7 +112,7 @@ impl AudioRingBuffer {
 
         // Nothing new available yet.
         if *position >= write_count {
-            return Vec::new();
+            return (Vec::new(), 0);
         }
 
         let start = (*position - oldest) as usize;
@@ -118,7 +120,7 @@ impl AudioRingBuffer {
         let samples: Vec<(f32, f32)> = st.samples.range(start..end).copied().collect();
         *position += (end - start) as u64;
 
-        samples
+        (samples, write_count - *position)
     }
 }
 
@@ -199,8 +201,10 @@ impl StreamingServer {
                 // Clone necessary data for the thread
                 let buffer = self.buffer.clone();
                 let client_count = self.client_count.clone();
-                let title = self.params.lock().preset_title.clone()
+                let params = self.params.clone();
+                let title = move || params.lock().preset_title.clone()
                     .unwrap_or_else(|| "Soulwhistle".to_string());
+                let sync = !query.split('&').any(|p| p.eq_ignore_ascii_case("sync=off"));
 
                 // Increment client count
                 {
@@ -210,7 +214,7 @@ impl StreamingServer {
 
                 // Spawn thread to handle this client
                 std::thread::spawn(move || {
-                    if let Err(e) = handle_stream_request(request, buffer.clone(), format, &title) {
+                    if let Err(e) = handle_stream_request(request, buffer.clone(), format, sync, Box::new(title)) {
                         eprintln!("Stream error: {}", e);
                     }
 
@@ -243,34 +247,49 @@ fn handle_stream_request(
     request: tiny_http::Request,
     buffer: Arc<AudioRingBuffer>,
     format: StreamFormat,
-    title: &str,
+    sync: bool,
+    mut title: Box<dyn FnMut() -> String + Send>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let sample_rate = buffer.sample_rate();
+    let wants_icy = request.headers().iter().any(|h| {
+        h.field.equiv("Icy-MetaData") && h.value.as_str().trim() == "1"
+    });
+    let first_title = title();
+    let title_for_header = first_title.as_str();
 
     // Header for an endless stream
     let (header, content_type) = if format.is_flac() {
-        (create_flac_header(sample_rate, format, title)?, &b"audio/flac"[..])
+        (create_flac_header(sample_rate, format, title_for_header)?, &b"audio/flac"[..])
     } else {
         (create_wav_header(sample_rate, format), &b"audio/wav"[..])
     };
 
     // Create a streaming reader, starting near live
-    let stream_reader = AudioStreamReader::new(buffer, Some(header), format);
+    let stream_reader = AudioStreamReader::new(buffer, Some(header), format, sync);
 
-    // Create response
+    let mut headers = vec![
+        tiny_http::Header::from_bytes(&b"Content-Type"[..], content_type).unwrap(),
+        tiny_http::Header::from_bytes(&b"Cache-Control"[..], &b"no-cache"[..]).unwrap(),
+        tiny_http::Header::from_bytes(&b"icy-name"[..], &b"Soulwhistle"[..]).unwrap(),
+    ];
+    let body: Box<dyn std::io::Read + Send> = if wants_icy {
+        headers.push(tiny_http::Header::from_bytes(
+            &b"icy-metaint"[..], ICY_METAINT.to_string().as_bytes()).unwrap());
+        Box::new(IcyReader::new(stream_reader, title))
+    } else {
+        Box::new(stream_reader)
+    };
+
     let response = tiny_http::Response::new(
         tiny_http::StatusCode(200),
-        vec![
-            tiny_http::Header::from_bytes(&b"Content-Type"[..], content_type).unwrap(),
-            tiny_http::Header::from_bytes(&b"Cache-Control"[..], &b"no-cache"[..]).unwrap(),
-        ],
-        stream_reader,
+        headers,
+        body,
         None, // Unknown length (infinite stream)
         None,
     );
-    
+
     request.respond(response)?;
-    
+
     Ok(())
 }
 
@@ -385,23 +404,231 @@ fn flac_stream_info(sample_rate: u32, bits: usize) -> std::io::Result<flacenc::c
     Ok(info)
 }
 
+/// Keeps a listener in step with the synth when the two sound cards' clocks run at
+/// slightly different speeds (typically 10 to 100 parts per million).
+///
+/// Without it, a listener whose card is slower falls behind by a few seconds over
+/// many hours and then skips ahead with a click; a faster one drains its own buffer
+/// and stutters. The corrector watches how far this reader is behind live: if the
+/// distance grows, it consumes the synth's samples a little faster than it sends
+/// them, and slower if it shrinks. The change in speed is capped at
+/// STREAM_SYNC_MAX_PPM (0.05 %), far below what the ear can hear as a pitch change.
+///
+/// Samples between the synth's are computed with a windowed-sinc interpolator
+/// (Kaiser window, SYNC_TAPS taps), flat to about 0.47 × the sample rate, so
+/// layers up to the synth's own limit (0.45 × the sample rate) pass unchanged.
+struct DriftCorrector {
+    input: Vec<(f32, f32)>, // Source samples; input[pos.floor() + 1 - SYNC_HALF] is the oldest one used
+    pos: f64,               // Position in `input` of the next output sample
+    ratio: f64,             // Source samples consumed per output sample
+    lag_avg: f64,           // Smoothed distance behind live, in samples
+    target: f64,            // Distance behind live to aim for, in samples
+    sample_rate: f64,
+}
+
+/// Half the interpolator length: SYNC_HALF source samples on each side.
+const SYNC_HALF: usize = 48;
+const SYNC_TAPS: usize = 2 * SYNC_HALF;
+/// Fractional positions tabulated; values between two are linearly interpolated.
+const SYNC_PHASES: usize = 512;
+/// Kaiser window shape: about 90 dB stop-band rejection.
+const SYNC_KAISER_BETA: f64 = 8.6;
+
+/// Interpolator coefficients, one row of SYNC_TAPS per phase (SYNC_PHASES + 1 rows),
+/// each row normalised to sum to 1. Built once, shared by every listener.
+fn sync_kernel() -> &'static [f32] {
+    static KERNEL: std::sync::OnceLock<Vec<f32>> = std::sync::OnceLock::new();
+    KERNEL.get_or_init(|| {
+        // Modified Bessel function of the first kind, order 0 (series).
+        fn i0(x: f64) -> f64 {
+            let (mut sum, mut term, mut k) = (1.0, 1.0, 1.0);
+            while term > 1e-12 * sum {
+                term *= (x / (2.0 * k)).powi(2);
+                sum += term;
+                k += 1.0;
+            }
+            sum
+        }
+        let mut table = Vec::with_capacity((SYNC_PHASES + 1) * SYNC_TAPS);
+        for p in 0..=SYNC_PHASES {
+            let frac = p as f64 / SYNC_PHASES as f64;
+            let row: Vec<f64> = (0..SYNC_TAPS)
+                .map(|k| {
+                    let d = k as f64 - (SYNC_HALF - 1) as f64 - frac;
+                    let sinc = if d == 0.0 { 1.0 } else { (std::f64::consts::PI * d).sin() / (std::f64::consts::PI * d) };
+                    let x = d / SYNC_HALF as f64;
+                    let w = if x.abs() >= 1.0 { 0.0 } else { i0(SYNC_KAISER_BETA * (1.0 - x * x).sqrt()) / i0(SYNC_KAISER_BETA) };
+                    sinc * w
+                })
+                .collect();
+            let sum: f64 = row.iter().sum();
+            table.extend(row.iter().map(|v| (v / sum) as f32));
+        }
+        table
+    })
+}
+
+impl DriftCorrector {
+    fn new(sample_rate: u32, target_samples: u64) -> Self {
+        let mut c = Self {
+            input: Vec::new(),
+            pos: 0.0,
+            ratio: 1.0,
+            lag_avg: target_samples as f64,
+            target: target_samples as f64,
+            sample_rate: sample_rate as f64,
+        };
+        c.reset();
+        c
+    }
+
+    /// Forget buffered samples (after a jump in the source, such as a preset
+    /// change). The speed estimate is kept: the clocks have not changed.
+    fn reset(&mut self) {
+        self.input.clear();
+        self.input.resize(SYNC_HALF - 1, (0.0, 0.0));
+        self.pos = (SYNC_HALF - 1) as f64;
+    }
+
+    /// Feed new source samples, read when the reader was `lag` samples behind live.
+    fn push(&mut self, samples: &[(f32, f32)], lag: u64) {
+        self.input.extend_from_slice(samples);
+        let alpha = (samples.len() as f64 / (STREAM_SYNC_SMOOTHING_S * self.sample_rate)).min(1.0);
+        self.lag_avg += alpha * (lag as f64 - self.lag_avg);
+        let error_s = (self.lag_avg - self.target) / self.sample_rate;
+        let max = STREAM_SYNC_MAX_PPM * 1e-6;
+        self.ratio = 1.0 + (STREAM_SYNC_GAIN * error_s).clamp(-max, max);
+    }
+
+    /// Append up to `max` output samples to `out`; returns how many were added.
+    fn produce(&mut self, max: usize, out: &mut Vec<(f32, f32)>) -> usize {
+        let kernel = sync_kernel();
+        let mut made = 0;
+        while made < max {
+            let i = self.pos.floor() as usize;
+            if i + SYNC_HALF >= self.input.len() {
+                break; // Need more source samples
+            }
+            let frac = self.pos - i as f64;
+            let sample = if frac == 0.0 {
+                self.input[i] // On a source sample: copy it exactly
+            } else {
+                let phase = frac * SYNC_PHASES as f64;
+                let p = (phase.floor() as usize).min(SYNC_PHASES - 1);
+                let t = (phase - p as f64) as f32;
+                let row_a = &kernel[p * SYNC_TAPS..(p + 1) * SYNC_TAPS];
+                let row_b = &kernel[(p + 1) * SYNC_TAPS..(p + 2) * SYNC_TAPS];
+                let window = &self.input[i + 1 - SYNC_HALF..=i + SYNC_HALF];
+                let (mut l, mut r) = (0.0f32, 0.0f32);
+                for k in 0..SYNC_TAPS {
+                    let w = row_a[k] + t * (row_b[k] - row_a[k]);
+                    l += w * window[k].0;
+                    r += w * window[k].1;
+                }
+                (l, r)
+            };
+            out.push(sample);
+            made += 1;
+            self.pos += self.ratio;
+        }
+        // Drop source samples no longer needed, keeping the interpolator's history.
+        let keep_from = (self.pos.floor() as usize).saturating_sub(SYNC_HALF - 1);
+        if keep_from > 0 {
+            self.input.drain(..keep_from);
+            self.pos -= keep_from as f64;
+        }
+        made
+    }
+}
+
+/// ICY ("Shoutcast") metadata, used by VLC, mpv, ffmpeg and most internet radio
+/// players to show the current title. A player asks for it with the request
+/// header `Icy-MetaData: 1`; the server then inserts a metadata block after every
+/// ICY_METAINT bytes of the body. Players remove the blocks before decoding, so
+/// this works with any format (WAV or FLAC) and the title follows preset changes
+/// without reconnecting.
+struct IcyReader<R> {
+    inner: R,
+    until_meta: usize,
+    meta: Vec<u8>,
+    meta_pos: usize,
+    title: Box<dyn FnMut() -> String + Send>,
+    sent_title: Option<String>,
+}
+
+impl<R: std::io::Read> IcyReader<R> {
+    fn new(inner: R, title: Box<dyn FnMut() -> String + Send>) -> Self {
+        Self { inner, until_meta: ICY_METAINT, meta: Vec::new(), meta_pos: 0, title, sent_title: None }
+    }
+}
+
+/// One ICY metadata block: a length byte (in units of 16 bytes) and
+/// `StreamTitle='…';` padded with zeros, or a single 0 when nothing changed.
+fn icy_block(title: Option<&str>) -> Vec<u8> {
+    let Some(title) = title else { return vec![0] };
+    // A quote would end the value early: use the typographic apostrophe instead.
+    let mut text = format!("StreamTitle='{}';", title.replace('\'', "\u{2019}"));
+    let max = 255 * 16;
+    if text.len() > max {
+        let mut cut = max - 2;
+        while !text.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        text.truncate(cut);
+        text.push_str("';");
+    }
+    let units = text.len().div_ceil(16);
+    let mut block = Vec::with_capacity(1 + units * 16);
+    block.push(units as u8);
+    block.extend_from_slice(text.as_bytes());
+    block.resize(1 + units * 16, 0);
+    block
+}
+
+impl<R: std::io::Read> std::io::Read for IcyReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.meta_pos >= self.meta.len() && self.until_meta == 0 {
+            let title = (self.title)();
+            let changed = self.sent_title.as_deref() != Some(title.as_str());
+            self.meta = icy_block(changed.then_some(title.as_str()));
+            self.meta_pos = 0;
+            if changed {
+                self.sent_title = Some(title);
+            }
+            self.until_meta = ICY_METAINT;
+        }
+        if self.meta_pos < self.meta.len() {
+            let rest = &self.meta[self.meta_pos..];
+            let len = rest.len().min(buf.len());
+            buf[..len].copy_from_slice(&rest[..len]);
+            self.meta_pos += len;
+            return Ok(len);
+        }
+        let n = buf.len().min(self.until_meta);
+        let got = self.inner.read(&mut buf[..n])?;
+        self.until_meta -= got;
+        Ok(got)
+    }
+}
+
 /// Custom reader that streams audio data
 struct AudioStreamReader {
     buffer: Arc<AudioRingBuffer>,
     position: u64,
     header: Option<Vec<u8>>,
-    pcm_buffer: Vec<u8>, // Reusable buffer for PCM conversion
     epoch: u32,          // Last seen epoch (bumped on preset change)
     format: StreamFormat,
     dither_state: u32,   // xorshift32 state for TPDF dither
     lead: u64,           // Samples behind live to (re)start at
     flac: Option<FlacEncoder>,
+    sync: Option<DriftCorrector>, // None: samples sent exactly as generated
     pending: Vec<u8>,    // Encoded bytes not yet handed to the HTTP writer
     pending_pos: usize,
+    out: Vec<(f32, f32)>, // Reused output sample buffer
 }
 
 impl AudioStreamReader {
-    fn new(buffer: Arc<AudioRingBuffer>, header: Option<Vec<u8>>, format: StreamFormat) -> Self {
+    fn new(buffer: Arc<AudioRingBuffer>, header: Option<Vec<u8>>, format: StreamFormat, sync: bool) -> Self {
         let lead = buffer.sample_rate() as u64 * STREAM_START_LEAD_MS / 1000;
         let position = buffer.live_position(lead);
         let epoch = buffer.get_epoch();
@@ -410,24 +637,27 @@ impl AudioStreamReader {
         } else {
             None
         };
+        let sync = sync.then(|| DriftCorrector::new(buffer.sample_rate(), lead));
         Self {
             buffer,
             position,
             header,
-            pcm_buffer: Vec::new(),
             epoch,
             format,
             dither_state: 0x9E37_79B9,
             lead,
             flac,
+            sync,
             pending: Vec::new(),
             pending_pos: 0,
+            out: Vec::with_capacity(FLAC_BLOCK_SIZE),
         }
     }
 
-    /// Block until up to `max` new samples are available. Never returns empty:
+    /// Block until up to `max` new source samples are available, and return them
+    /// with how far behind live the reader still is. Never returns empty:
     /// returning Ok(0) from `read` would make players treat the stream as ended.
-    fn next_samples(&mut self, max: usize) -> Vec<(f32, f32)> {
+    fn next_samples(&mut self, max: usize) -> (Vec<(f32, f32)>, u64) {
         loop {
             // Preset changed: the buffer was flushed. Jump to the new preset's audio
             // (the usual lead behind live, clamped to the first sample after the
@@ -437,16 +667,38 @@ impl AudioStreamReader {
             if epoch != self.epoch {
                 self.epoch = epoch;
                 self.position = self.buffer.live_position(self.lead);
+                if let Some(sync) = self.sync.as_mut() {
+                    sync.reset();
+                }
             }
 
-            let samples = self.buffer.read_samples(&mut self.position, max);
+            let (samples, lag) = self.buffer.read_samples_lag(&mut self.position, max);
             if !samples.is_empty() {
-                return samples;
+                return (samples, lag);
             }
 
             // No data yet (buffer underrun) — wait briefly, then retry.
             std::thread::sleep(Duration::from_millis(STREAM_READ_WAIT_MS));
         }
+    }
+
+    /// Up to `max` samples to send, clock-corrected when sync is on, into `self.out`.
+    fn next_output(&mut self, max: usize) {
+        self.out.clear();
+        if self.sync.is_none() {
+            let (samples, _) = self.next_samples(max);
+            self.out.extend_from_slice(&samples);
+            return;
+        }
+        let mut out = std::mem::take(&mut self.out);
+        loop {
+            if self.sync.as_mut().unwrap().produce(max, &mut out) > 0 {
+                break;
+            }
+            let (samples, lag) = self.next_samples(max);
+            self.sync.as_mut().unwrap().push(&samples, lag);
+        }
+        self.out = out;
     }
 
     /// Fill one FLAC block from the ring buffer and encode it into `pending`.
@@ -457,7 +709,9 @@ impl AudioStreamReader {
         let full_scale = if self.format == StreamFormat::Flac16 { PCM_I16_MAX } else { PCM_I24_MAX };
         while enc.block.len() < FLAC_BLOCK_SIZE * 2 {
             let want = FLAC_BLOCK_SIZE - enc.block.len() / 2;
-            for (l, r) in self.next_samples(want) {
+            self.next_output(want);
+            for i in 0..self.out.len() {
+                let (l, r) = self.out[i];
                 let li = self.quantise(l, full_scale);
                 let ri = self.quantise(r, full_scale);
                 enc.block.push(li);
@@ -469,6 +723,34 @@ impl AudioStreamReader {
         let result = enc.encode_block(&mut self.pending);
         self.flac = Some(enc);
         result
+    }
+
+    /// Convert the next batch of samples to WAV PCM bytes in `pending`.
+    fn fill_pcm(&mut self) {
+        self.next_output(STREAM_READ_CHUNK_SIZE);
+        let mut pcm = std::mem::take(&mut self.pending);
+        pcm.clear();
+        self.pending_pos = 0;
+        for i in 0..self.out.len() {
+            let (left, right) = self.out[i];
+            for x in [left, right] {
+                match self.format {
+                    StreamFormat::S16 => {
+                        let v = self.quantise(x, PCM_I16_MAX) as i16;
+                        pcm.extend_from_slice(&v.to_le_bytes());
+                    }
+                    StreamFormat::S24 => {
+                        let v = self.quantise(x, PCM_I24_MAX);
+                        pcm.extend_from_slice(&v.to_le_bytes()[..3]);
+                    }
+                    StreamFormat::F32 => {
+                        pcm.extend_from_slice(&x.clamp(AUDIO_CLAMP_MIN, AUDIO_CLAMP_MAX).to_le_bytes());
+                    }
+                    StreamFormat::Flac16 | StreamFormat::Flac24 => unreachable!("FLAC uses fill_flac_frame"),
+                }
+            }
+        }
+        self.pending = pcm;
     }
 
     /// Triangular (TPDF) dither in LSBs: sum of two uniform values, range (-1, 1).
@@ -509,58 +791,19 @@ impl std::io::Read for AudioStreamReader {
             return Ok(len);
         }
 
-        // FLAC: hand out the current encoded frame, encoding the next when empty.
-        if self.format.is_flac() {
-            if self.pending_pos >= self.pending.len() {
+        // Hand out the current batch, preparing the next when it is used up. Any
+        // `buf` size works: a partial frame simply waits for the next call.
+        if self.pending_pos >= self.pending.len() {
+            if self.format.is_flac() {
                 self.fill_flac_frame()?;
-            }
-            let rest = &self.pending[self.pending_pos..];
-            let len = rest.len().min(buf.len());
-            buf[..len].copy_from_slice(&rest[..len]);
-            self.pending_pos += len;
-            return Ok(len);
-        }
-
-        // Only read as many samples as fit in `buf`, so the whole PCM batch is
-        // always flushed, never truncated and lost.
-        let frame_bytes = 2 * self.format.bytes_per_sample() as usize;
-        let max_samples = (buf.len() / frame_bytes).min(STREAM_READ_CHUNK_SIZE);
-        if max_samples == 0 {
-            // Caller-provided buffer can't hold a full stereo frame; signal EOF.
-            return Ok(0);
-        }
-
-        let samples = self.next_samples(max_samples);
-
-        // Reuse the PCM buffer (clear but keep capacity)
-        let mut pcm = std::mem::take(&mut self.pcm_buffer);
-        pcm.clear();
-        pcm.reserve(samples.len() * frame_bytes);
-
-        for (left, right) in samples {
-            for x in [left, right] {
-                match self.format {
-                    StreamFormat::S16 => {
-                        let v = self.quantise(x, PCM_I16_MAX) as i16;
-                        pcm.extend_from_slice(&v.to_le_bytes());
-                    }
-                    StreamFormat::S24 => {
-                        let v = self.quantise(x, PCM_I24_MAX);
-                        pcm.extend_from_slice(&v.to_le_bytes()[..3]);
-                    }
-                    StreamFormat::F32 => {
-                        pcm.extend_from_slice(&x.clamp(AUDIO_CLAMP_MIN, AUDIO_CLAMP_MAX).to_le_bytes());
-                    }
-                    StreamFormat::Flac16 | StreamFormat::Flac24 => unreachable!("handled above"),
-                }
+            } else {
+                self.fill_pcm();
             }
         }
-        self.pcm_buffer = pcm;
-
-        // PCM batch is sized to fit `buf` by construction, so this copies all of it.
-        let len = self.pcm_buffer.len().min(buf.len());
-        buf[..len].copy_from_slice(&self.pcm_buffer[..len]);
-
+        let rest = &self.pending[self.pending_pos..];
+        let len = rest.len().min(buf.len());
+        buf[..len].copy_from_slice(&rest[..len]);
+        self.pending_pos += len;
         Ok(len)
     }
 }
@@ -673,7 +916,7 @@ mod tests {
             // minimum frame size stalls VLC on a live stream.
             assert_eq!(&header[8..12], &[0x10, 0x00, 0x10, 0x00], "block sizes");
             assert_eq!(&header[12..18], &[0u8; 6], "frame sizes must be 0 (unknown)");
-            let mut r = AudioStreamReader::new(b, Some(header), fmt);
+            let mut r = AudioStreamReader::new(b, Some(header), fmt, false);
             r.position = 0; // start at the first sample for the comparison
             let mut bytes = Vec::new();
             let mut buf = [0u8; 8192];
@@ -725,6 +968,138 @@ mod tests {
         }
     }
 
+    /// Reads with any buffer size, down to one byte, give the same byte stream:
+    /// players and the ICY wrapper may ask for less than one sample frame.
+    #[test]
+    fn tiny_reads_never_end_the_stream() {
+        let b = buffer_with(4800);
+        let mut whole = AudioStreamReader::new(b.clone(), None, StreamFormat::S24, false);
+        let mut tiny = AudioStreamReader::new(b, None, StreamFormat::S24, false);
+        let mut big = vec![0u8; 3000];
+        let n = whole.read(&mut big).unwrap();
+        let mut got = Vec::new();
+        let mut one = [0u8; 1];
+        while got.len() < n {
+            assert_eq!(tiny.read(&mut one).unwrap(), 1, "a 1-byte read must not signal EOF");
+            got.push(one[0]);
+        }
+        // Dither differs per reader only through its own sequence, which is the same.
+        assert_eq!(&got[..], &big[..n]);
+    }
+
+    /// ICY blocks: one after every ICY_METAINT body bytes, the title only when it
+    /// changed (a single zero byte otherwise), in the documented layout.
+    #[test]
+    fn icy_inserts_title_blocks() {
+        use std::sync::atomic::AtomicUsize;
+        let body: Vec<u8> = (0..ICY_METAINT * 3).map(|i| (i % 251) as u8).collect();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let c = calls.clone();
+        let title = move || {
+            let n = c.fetch_add(1, Ordering::SeqCst);
+            if n < 2 { "Focus 10".to_string() } else { "It's 40 Hz".to_string() }
+        };
+        let mut r = IcyReader::new(std::io::Cursor::new(body.clone()), Box::new(title));
+        let mut out = Vec::new();
+        let mut buf = [0u8; 7000]; // Not a divisor of ICY_METAINT
+        loop {
+            let n = r.read(&mut buf).unwrap();
+            if n == 0 { break; }
+            out.extend_from_slice(&buf[..n]);
+        }
+        let m = ICY_METAINT;
+        assert_eq!(&out[..m], &body[..m]);
+        // First block: the title.
+        let len = out[m] as usize * 16;
+        let text = String::from_utf8_lossy(&out[m + 1..m + 1 + len]);
+        assert!(text.starts_with("StreamTitle='Focus 10';"), "{text}");
+        let mut at = m + 1 + len;
+        assert_eq!(&out[at..at + m], &body[m..2 * m]);
+        at += m;
+        // Same title: a zero-length block.
+        assert_eq!(out[at], 0);
+        at += 1;
+        assert_eq!(&out[at..at + m], &body[2 * m..3 * m]);
+        at += m;
+        // Changed title, with the quote replaced so it cannot end the value early.
+        let len = out[at] as usize * 16;
+        let text = String::from_utf8_lossy(&out[at + 1..at + 1 + len]);
+        assert!(text.starts_with("StreamTitle='It\u{2019}s 40 Hz';"), "{text}");
+    }
+
+    /// At an unchanged speed the corrector passes samples through exactly.
+    #[test]
+    fn drift_corrector_is_exact_at_unity() {
+        let mut c = DriftCorrector::new(48000, 9600);
+        let src: Vec<(f32, f32)> = (0..2000).map(|i| (i as f32 * 1e-3, -(i as f32) * 1e-3)).collect();
+        c.push(&src, 9600); // Lag equals the target: ratio stays 1
+        let mut out = Vec::new();
+        c.produce(usize::MAX, &mut out);
+        assert!(out.len() > 1900);
+        // Output n is source sample n, bit for bit (the zero history only feeds the
+        // interpolator's left side).
+        assert_eq!(&out[..], &src[..out.len()]);
+    }
+
+    /// Between source samples the interpolator reproduces a sine at 0.45 × the
+    /// sample rate (the synth's upper limit) to better than -60 dB.
+    #[test]
+    fn drift_corrector_interpolates_accurately() {
+        let fs = 48000.0f64;
+        let f = 0.45 * fs;
+        let mut c = DriftCorrector::new(48000, 0);
+        c.ratio = 1.0 + 400e-6; // Fixed speed change: positions sweep all phases
+        let src: Vec<(f32, f32)> = (0..20000)
+            .map(|i| {
+                let v = (2.0 * std::f64::consts::PI * f * i as f64 / fs).sin() as f32;
+                (v, v)
+            })
+            .collect();
+        c.input.extend_from_slice(&src);
+        let mut out = Vec::new();
+        c.produce(usize::MAX, &mut out);
+        let mut worst = 0.0f64;
+        for (n, s) in out.iter().enumerate().skip(SYNC_HALF * 2) {
+            // Output n sits at source position n × ratio.
+            let t = n as f64 * (1.0 + 400e-6);
+            let want = (2.0 * std::f64::consts::PI * f * t / fs).sin();
+            worst = worst.max((s.0 as f64 - want).abs());
+        }
+        assert!(worst < 1e-3, "worst error {worst}");
+    }
+
+    /// The control loop, on a model of the stream: the synth makes samples at its
+    /// rate, the listener takes them at a rate off by `ppm`. Without correction the
+    /// lag would drift by 0.0003 s per second (over 2 s in under 2 hours); with it,
+    /// the lag settles near the target and never reaches the 2 s skip.
+    #[test]
+    fn drift_correction_holds_the_lag() {
+        for ppm in [-300.0, 100.0, 300.0] {
+            let fs = 48000u32;
+            let target = 9600u64; // 200 ms
+            let mut c = DriftCorrector::new(fs, target);
+            let mut lag = target as f64;
+            let step = 4800.0; // 100 ms of listener time per step
+            let mut worst = 0.0f64;
+            for _ in 0..(6 * 3600 * 10) { // 6 hours
+                // Synth output during the step, in listener samples:
+                let produced = step * (1.0 + ppm * 1e-6);
+                // Listener takes `step` outputs, consuming step × ratio source samples.
+                let consumed = step * c.ratio;
+                lag += produced - consumed;
+                c.lag_avg += (step / (STREAM_SYNC_SMOOTHING_S * fs as f64)).min(1.0) * (lag - c.lag_avg);
+                let err = (c.lag_avg - c.target) / fs as f64;
+                let max = STREAM_SYNC_MAX_PPM * 1e-6;
+                c.ratio = 1.0 + (STREAM_SYNC_GAIN * err).clamp(-max, max);
+                worst = worst.max((lag - target as f64).abs() / fs as f64);
+            }
+            assert!(worst < 0.5, "{ppm} ppm: lag strayed {worst:.3} s from target");
+            let settled = (lag - target as f64) / fs as f64;
+            let expected = ppm * 1e-6 / STREAM_SYNC_GAIN;
+            assert!((settled - expected).abs() < 0.02, "{ppm} ppm: settled {settled:.3} s, expected {expected:.3}");
+        }
+    }
+
     #[test]
     fn query_selects_format() {
         assert_eq!(StreamFormat::from_query("", StreamFormat::S16), Ok(StreamFormat::S16));
@@ -757,7 +1132,7 @@ mod tests {
     #[test]
     fn new_listener_starts_near_live() {
         let b = buffer_with(48000); // 1 s buffered
-        let r = AudioStreamReader::new(b, None, StreamFormat::S16);
+        let r = AudioStreamReader::new(b, None, StreamFormat::S16, false);
         let lead = 48000 * STREAM_START_LEAD_MS / 1000;
         assert_eq!(r.position, 48000 - lead);
     }
@@ -765,8 +1140,9 @@ mod tests {
     #[test]
     fn stream_survives_preset_change() {
         let b = buffer_with(4800);
-        let mut r = AudioStreamReader::new(b.clone(), None, StreamFormat::F32);
-        let mut buf = [0u8; 4096];
+        let mut r = AudioStreamReader::new(b.clone(), None, StreamFormat::F32, false);
+        // Larger than one batch, so each read empties it.
+        let mut buf = vec![0u8; STREAM_READ_CHUNK_SIZE * 8];
         assert!(r.read(&mut buf).unwrap() > 0);
 
         // Preset change: flush, then new audio arrives.
@@ -786,7 +1162,7 @@ mod tests {
         for fmt in [StreamFormat::S16, StreamFormat::S24, StreamFormat::F32] {
             let b = Arc::new(AudioRingBuffer::new(48000, 2000));
             b.push_samples_batch(&vals);
-            let mut r = AudioStreamReader::new(b, None, fmt);
+            let mut r = AudioStreamReader::new(b, None, fmt, false);
             let mut buf = [0u8; 4096];
             let n = r.read(&mut buf).unwrap();
             let bps = fmt.bytes_per_sample() as usize;

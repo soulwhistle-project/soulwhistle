@@ -215,6 +215,19 @@ pub const STREAM_START_LEAD_MS: u64 = 200;
 /// 48 kHz). Larger blocks compress better but add that much latency.
 pub const FLAC_BLOCK_SIZE: usize = 4096;
 
+/// Network stream clock correction (see `DriftCorrector` in streaming.rs).
+/// Largest speed change, in parts per million (0.05 %: inaudible as pitch, and
+/// several times the usual mismatch between two sound cards).
+pub const STREAM_SYNC_MAX_PPM: f64 = 500.0;
+/// Speed change per second of error in the distance behind live: 0.1 s of error
+/// gives 100 ppm. Settles over about 1000 s, far faster than clocks drift.
+pub const STREAM_SYNC_GAIN: f64 = 1e-3;
+/// Averaging time for the distance behind live, which jumps with every read.
+pub const STREAM_SYNC_SMOOTHING_S: f64 = 10.0;
+
+/// Bytes of stream between two ICY title blocks (the usual value for internet radio).
+pub const ICY_METAINT: usize = 16000;
+
 /// Streaming server accept poll timeout (ms) — bounds shutdown latency when
 /// streaming is toggled off or the port changes
 pub const STREAM_ACCEPT_TIMEOUT_MS: u64 = 500;

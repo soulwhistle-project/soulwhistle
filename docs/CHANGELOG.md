@@ -4,6 +4,9 @@
 
 - FLAC network stream: `/stream.flac` (24-bit) and `?fmt=flac16`, lossless at about half the bandwidth of WAV, encoded per listener with the pure-Rust `flacenc` crate, tagged with the preset title
 - The streaming panel shows this machine's address and both stream links instead of `<ip>`
+- Live title updates on the network stream (ICY metadata): players show the new preset's name after a preset change without reconnecting
+- Clock correction on the network stream: each listener is resampled by at most 0.05 % to stay about 200 ms behind live, so long sessions no longer drift and skip (`?sync=off` for samples exactly as generated)
+- `--list-devices`, `--device` and `--sample-rate`: choose the audio output and run the synth at 96 or 192 kHz for ultrasonic layers; the sample rate is shown in the header
 - New "Gamma 40 Hz Pulses" preset and `GammaPulse` ping type: 1 ms tones at 10 kHz, 40 per second, as in Martorell et al. 2019
 - explore_all: carriers moved to 300/307.5 Hz so its 220 Hz harmonic and 432 Hz pad no longer beat against them; adjusting the beat keeps the preset's carrier
 - Deep Focus presets renamed to match their titles (`DEFAULT_deep_focus_adhd_alpha.json`, `DEFAULT_deep_focus_smr.json`); old copies are moved aside as `.bak`
